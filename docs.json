@@ -98,13 +98,25 @@
               "api/customizers"
             ]
           },
-          {
-            "group": "Deployment API",
-            "pages": [
-              "api/deployable",
-              "api/openshift-deployable"
-            ]
-          }
+        {
+          "group": "Deployment API",
+          "pages": [
+            "api/deployable",
+            "api/openshift-deployable",
+            "api/container-deployable",
+            "api/remote-service",
+            "api/reusable-deployable",
+            "api/deployment-helpers"
+          ]
+        },
+        {
+          "group": "Configuration API",
+          "pages": [
+            "api/test-configuration",
+            "api/openshift-configuration",
+            "api/product-configuration"
+          ]
+        }
         ]
       }
     ]

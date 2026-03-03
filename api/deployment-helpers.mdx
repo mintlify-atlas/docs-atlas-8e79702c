@@ -1,0 +1,416 @@
+---
+title: Deployment helpers
+description: Mix-in interfaces that add capabilities to deployment implementations
+---
+
+TNB provides several helper interfaces that add specific capabilities to your deployment implementations. These are designed as mix-ins that can be combined with the main deployment interfaces.
+
+## WithName
+
+Adds identity and discovery capabilities for named OpenShift resources.
+
+### Interface signature
+
+```java
+public interface WithName
+```
+
+### Methods
+
+<ParamField path="name()" type="String" required>
+  Returns the name of the deployment resource. This name is used for pod selection and deployment identification.
+  
+  ```java
+  String name();
+  ```
+</ParamField>
+
+<ParamField path="podSelector()" type="Predicate<Pod>">
+  Returns a predicate to filter pods belonging to this deployment based on labels.
+  
+  ```java
+  default Predicate<Pod> podSelector() {
+      return p -> OpenshiftClient.get().hasLabels(p, 
+          Map.of(OpenshiftConfiguration.openshiftDeploymentLabel(), name()));
+  }
+  ```
+</ParamField>
+
+<ParamField path="isDeployed()" type="boolean">
+  Checks if the deployment exists in OpenShift and is not marked for deletion.
+  
+  ```java
+  default boolean isDeployed() {
+      final Deployment deployment = OpenshiftClient.get()
+          .apps().deployments().withName(name()).get();
+      return deployment != null && !deployment.isMarkedForDeletion();
+  }
+  ```
+</ParamField>
+
+### Example
+
+```java
+public class OpenshiftRedis implements OpenshiftDeployable, WithName {
+    @Override
+    public String name() {
+        return "redis";
+    }
+    
+    @Override
+    public Predicate<Pod> podSelector() {
+        return WithName.super.podSelector();
+    }
+    
+    @Override
+    public void create() {
+        // Create deployment with name "redis"
+    }
+}
+```
+
+---
+
+## WithDockerImage
+
+Provides configurable Docker image selection with system property overrides.
+
+### Interface signature
+
+```java
+public interface WithDockerImage
+```
+
+### Methods
+
+<ParamField path="defaultImage()" type="String" required>
+  Specifies the default Docker image to use if no override is provided.
+  
+  ```java
+  String defaultImage();
+  ```
+</ParamField>
+
+<ParamField path="image()" type="String">
+  Returns the Docker image to use, checking for system property overrides first.
+  
+  ```java
+  default String image() {
+      return TestConfiguration.getProperty(
+          String.format("tnb.%s.image", 
+              ReflectionUtil.getSuperClassName(this.getClass()).toLowerCase()),
+          defaultImage()
+      );
+  }
+  ```
+</ParamField>
+
+### Property format
+
+Images can be overridden using the property pattern:
+```
+tnb.<service-name>.image
+```
+
+### Example
+
+```java
+public class OpenshiftMongoDB implements OpenshiftDeployable, WithDockerImage {
+    @Override
+    public String defaultImage() {
+        return "mongo:7.0";
+    }
+    
+    @Override
+    public void create() {
+        // Use image() to get the configured image
+        String mongoImage = image();
+        
+        // Create container with the image
+        OpenshiftClient.get().apps().deployments()
+            .createOrReplace(new DeploymentBuilder()
+                // ... deployment configuration
+                .addNewContainer()
+                    .withImage(mongoImage)
+                .endContainer()
+                .build());
+    }
+}
+```
+
+**Override the image:**
+```bash
+mvn test -Dtnb.mongodb.image=mongo:6.0
+```
+
+---
+
+## WithExternalHostname
+
+Provides the hostname for external client connections (e.g., from test code to the service).
+
+### Interface signature
+
+```java
+public interface WithExternalHostname
+```
+
+### Methods
+
+<ParamField path="externalHostname()" type="String" required>
+  Returns the hostname used for connections from outside the cluster. Often "localhost" when using port-forwarding.
+  
+  ```java
+  String externalHostname();
+  ```
+</ParamField>
+
+### Use case
+
+This hostname represents how test code (running outside OpenShift) connects to the service. Commonly used with port-forwarding:
+
+```java
+public class OpenshiftKafka implements OpenshiftDeployable, WithExternalHostname {
+    private PortForward portForward;
+    
+    @Override
+    public String externalHostname() {
+        return "localhost";
+    }
+    
+    @Override
+    public void openResources() {
+        // Set up port forwarding
+        portForward = OpenshiftClient.get().services()
+            .withName("kafka")
+            .portForward(9092);
+    }
+    
+    public String getBootstrapServers() {
+        return externalHostname() + ":" + portForward.getLocalPort();
+    }
+}
+```
+
+---
+
+## WithInClusterHostname
+
+Provides the internal cluster hostname for pod-to-pod communication.
+
+### Interface signature
+
+```java
+public interface WithInClusterHostname
+```
+
+### Methods
+
+<ParamField path="inClusterHostname()" type="String">
+  Returns the internal cluster hostname in the format `name.namespace.svc.cluster.local`. Requires the implementing class to also implement `WithName`.
+  
+  ```java
+  default String inClusterHostname() {
+      if (this instanceof WithName) {
+          Function<WithName, String> getId = WithName::name;
+          try {
+              return OpenshiftClient.get().getClusterHostname(
+                  getId.apply((WithName) this)
+              );
+          } catch (Exception e) {
+              throw new RuntimeException(
+                  "Unable to cast " + this.getClass().getSimpleName() + " to WithName"
+              );
+          }
+      } else {
+          throw new IllegalArgumentException(
+              "Class " + this.getClass().getSimpleName() + 
+              " does not implement WithName, you need to override the default implementation"
+          );
+      }
+  }
+  ```
+</ParamField>
+
+### Use case
+
+Used when configuring one service to connect to another within the cluster:
+
+```java
+public class OpenshiftApplication implements OpenshiftDeployable, 
+                                             WithName, 
+                                             WithInClusterHostname {
+    private OpenshiftPostgreSQL database;
+    
+    @Override
+    public String name() {
+        return "my-app";
+    }
+    
+    @Override
+    public void create() {
+        // Configure application to connect to database using internal hostname
+        String dbUrl = String.format(
+            "jdbc:postgresql://%s:5432/mydb",
+            database.inClusterHostname()
+        );
+        
+        // Create deployment with environment variable
+        OpenshiftClient.get().apps().deployments()
+            .createOrReplace(new DeploymentBuilder()
+                // ...
+                .addNewContainer()
+                    .addNewEnv()
+                        .withName("DATABASE_URL")
+                        .withValue(dbUrl)
+                    .endEnv()
+                .endContainer()
+                .build());
+    }
+}
+```
+
+**Hostname format:**
+```
+postgresql.test-namespace.svc.cluster.local
+```
+
+---
+
+## WithLogs
+
+Provides access to service logs for debugging.
+
+### Interface signature
+
+```java
+public interface WithLogs
+```
+
+### Methods
+
+<ParamField path="getLogs()" type="String" required>
+  Returns the logs from the service.
+  
+  ```java
+  String getLogs();
+  ```
+</ParamField>
+
+<Note>
+  Most deployment interfaces (like `ContainerDeployable` and `OpenshiftDeployable`) already implement `WithLogs` through the `Deployable` interface.
+</Note>
+
+### Example
+
+```java
+@Test
+void testServiceBehavior() {
+    try {
+        // Test that might fail
+        service.performOperation();
+    } catch (Exception e) {
+        // Print logs for debugging
+        System.out.println("Service logs:");
+        System.out.println(service.getLogs());
+        throw e;
+    }
+}
+```
+
+---
+
+## Combining multiple helpers
+
+These interfaces are designed to be used together:
+
+```java
+public class OpenshiftRabbitMQ implements OpenshiftDeployable,
+                                          WithName,
+                                          WithDockerImage,
+                                          WithExternalHostname,
+                                          WithInClusterHostname {
+    private PortForward portForward;
+    
+    @Override
+    public String name() {
+        return "rabbitmq";
+    }
+    
+    @Override
+    public String defaultImage() {
+        return "rabbitmq:3.12-management";
+    }
+    
+    @Override
+    public String externalHostname() {
+        return "localhost";
+    }
+    
+    @Override
+    public void create() {
+        OpenshiftClient.get().apps().deployments()
+            .createOrReplace(new DeploymentBuilder()
+                .withNewMetadata()
+                    .withName(name())  // From WithName
+                .endMetadata()
+                .withNewSpec()
+                    .withNewTemplate()
+                        .withNewSpec()
+                            .addNewContainer()
+                                .withImage(image())  // From WithDockerImage
+                                .withName("rabbitmq")
+                                .addNewPort()
+                                    .withContainerPort(5672)
+                                .endPort()
+                            .endContainer()
+                        .endSpec()
+                    .endTemplate()
+                .endSpec()
+                .build());
+    }
+    
+    @Override
+    public void openResources() {
+        portForward = OpenshiftClient.get().services()
+            .withName(name())
+            .portForward(5672);
+    }
+    
+    @Override
+    public void closeResources() {
+        if (portForward != null) {
+            portForward.close();
+        }
+    }
+    
+    @Override
+    public Predicate<Pod> podSelector() {
+        return WithName.super.podSelector();
+    }
+    
+    // External connection for tests
+    public String getExternalConnectionUrl() {
+        return String.format(
+            "amqp://%s:%d",
+            externalHostname(),  // From WithExternalHostname
+            portForward.getLocalPort()
+        );
+    }
+    
+    // Internal connection for other services
+    public String getInternalConnectionUrl() {
+        return String.format(
+            "amqp://%s:5672",
+            inClusterHostname()  // From WithInClusterHostname
+        );
+    }
+}
+```
+
+## Related interfaces
+
+- [Deployable](/api/deployable) - Base deployment interface
+- [ContainerDeployable](/api/container-deployable) - Container-based deployments
+- [OpenshiftDeployable](/api/openshift-deployable) - OpenShift deployments
+- [RemoteService](/api/remote-service) - External service connections

@@ -1,0 +1,315 @@
+---
+title: Test configuration
+description: Configure test execution, credentials, Maven settings, and application properties
+---
+
+The `TestConfiguration` class provides centralized configuration for test execution, credential management, Maven repository settings, and application properties. All configuration is done through system properties.
+
+## Property constants
+
+### Product configuration
+
+<ParamField path="test.product" type="string" required>
+  The product type to test (e.g., CAMEL_QUARKUS, CAMEL_SPRINGBOOT)
+</ParamField>
+
+### Credentials and vault
+
+<ParamField path="test.credentials.file" type="string">
+  Path to the credentials file
+</ParamField>
+
+<ParamField path="test.credentials" type="string">
+  Direct credentials configuration
+</ParamField>
+
+<ParamField path="test.credentials.vault.token" type="string">
+  Vault authentication token
+</ParamField>
+
+<ParamField path="test.credentials.vault.secret.id" type="string">
+  Vault secret ID for AppRole authentication
+</ParamField>
+
+<ParamField path="test.credentials.vault.role.id" type="string">
+  Vault role ID for AppRole authentication
+</ParamField>
+
+<ParamField path="test.credentials.vault.address" type="string" default="https://vault.devshift.net">
+  Vault server address
+</ParamField>
+
+<ParamField path="test.credentials.vault.path.pattern" type="string" default="/">
+  Pattern for constructing Vault secret paths
+</ParamField>
+
+### Application configuration
+
+<ParamField path="test.app.group.id" type="string" default="com.test">
+  Maven group ID for the test application
+</ParamField>
+
+<ParamField path="test.app.version" type="string" default="1.0.0-SNAPSHOT">
+  Version of the test application
+</ParamField>
+
+<ParamField path="test.app.location" type="string" default="target">
+  Directory where the application is located or will be built
+</ParamField>
+
+<ParamField path="app.template.name" type="string" default="tnb-app">
+  Name of the application template
+</ParamField>
+
+<ParamField path="tnb.app.debug" type="boolean" default="false">
+  Enable remote debugging for the application
+</ParamField>
+
+<ParamField path="tnb.app.debug.port" type="integer" default="5005">
+  Port for remote debugging
+</ParamField>
+
+### Test execution
+
+<ParamField path="test.wait.time" type="integer" default="60">
+  Wait time in seconds for test operations
+</ParamField>
+
+<ParamField path="test.wait.kill.timeout" type="integer" default="120">
+  Timeout in minutes before forcefully killing test processes
+</ParamField>
+
+<ParamField path="test.skip.teardown" type="boolean" default="false">
+  Skip cleanup after test execution
+</ParamField>
+
+<ParamField path="test.skip.teardown.openshift.amqstreams" type="boolean" default="false">
+  Skip cleanup of AMQ Streams resources on OpenShift
+</ParamField>
+
+<ParamField path="test.parallel" type="boolean" default="false">
+  Enable parallel test execution
+</ParamField>
+
+<ParamField path="test.use.global.openshift.kafka" type="boolean" default="false">
+  Use a global Kafka instance on OpenShift instead of per-test instances
+</ParamField>
+
+<ParamField path="stream.logs" type="boolean" default="false">
+  Enable streaming logs during test execution
+</ParamField>
+
+### Maven configuration
+
+<ParamField path="test.maven.repository" type="string">
+  Maven repository URL. Supports mirror syntax with `@mirrorOf=`
+</ParamField>
+
+<ParamField path="test.maven.settings" type="string">
+  Custom Maven settings XML content
+</ParamField>
+
+<ParamField path="test.maven.settings.file.name" type="string" default="tnb-maven-settings.xml">
+  Name of the generated Maven settings file
+</ParamField>
+
+<ParamField path="test.maven.repository.id" type="string" default="tnb-maven-repo">
+  ID for the Maven repository
+</ParamField>
+
+<ParamField path="test.maven.extra.args" type="string" default="">
+  Additional arguments to pass to Maven commands
+</ParamField>
+
+<ParamField path="test.maven.transfer.progress" type="boolean" default="false">
+  Show Maven artifact transfer progress
+</ParamField>
+
+### Tool paths
+
+<ParamField path="odo.path" type="string">
+  Path to the odo CLI binary. Auto-detected from system PATH if not specified
+</ParamField>
+
+### Integrations
+
+<ParamField path="test.report.portal.enabled" type="boolean" default="false">
+  Enable ReportPortal integration for test reporting
+</ParamField>
+
+<ParamField path="jira.allowed.resolutions" type="string" default="Resolved, Closed, Done, Validation Backlog, In Validation">
+  Comma-separated list of allowed JIRA issue resolutions
+</ParamField>
+
+<ParamField path="jira.token" type="string" default="">
+  JIRA access token for authentication
+</ParamField>
+
+### User configuration
+
+<ParamField path="tnb.user" type="string">
+  Username for TNB operations. Defaults to system username if not "hudson"
+</ParamField>
+
+### Kamelets
+
+<ParamField path="kamelets.version" type="string">
+  Version of Kamelets to use
+</ParamField>
+
+## Public methods
+
+### Product and version
+
+```java
+public static ProductType product()
+```
+Returns the configured product type from `test.product` property.
+
+### Vault methods
+
+```java
+public static String vaultToken()
+public static String vaultRoleId()
+public static String vaultSecretId()
+public static String vaultPathPattern()
+public static String vaultAddress()
+```
+Retrieve Vault authentication and configuration details.
+
+### Credentials methods
+
+```java
+public static String credentialsFile()
+public static String credentials()
+```
+Access credential configuration.
+
+### Application methods
+
+```java
+public static String appGroupId()
+public static String appVersion()
+public static Path appLocation()
+public static String appTemplateName()
+public static boolean appDebug()
+public static Integer appDebugPort()
+```
+Retrieve application configuration values.
+
+### Test execution methods
+
+```java
+public static Duration testWaitTime()
+public static Duration testWaitKillTimeout()
+public static boolean skipTearDown()
+public static boolean skipTearDownOpenshiftAMQStreams()
+public static boolean parallel()
+public static boolean streamLogs()
+public static boolean useGlobalOpenshiftKafka()
+```
+Control test execution behavior.
+
+### Maven methods
+
+```java
+public static String mavenRepository()
+public static String mavenSettings()
+public static String mavenExtraArgs()
+public static String mavenSettingsFileName()
+public static String mavenRepositoryId()
+public static boolean mavenTransferProgress()
+public static boolean isMavenMirror()
+```
+Access Maven configuration. The `isMavenMirror()` method checks if the repository URL contains `@mirrorOf=`.
+
+### Integration methods
+
+```java
+public static boolean reportPortalEnabled()
+public static Set<String> jiraAllowedResolutions()
+public static String jiraAccessToken()
+```
+Configure external integrations.
+
+### Utility methods
+
+```java
+public static String user()
+public static String odoPath()
+public static String kameletsVersion()
+```
+Retrieve user, tool paths, and component versions.
+
+## Usage examples
+
+### Basic test configuration
+
+```bash
+mvn test \
+  -Dtest.product=CAMEL_QUARKUS \
+  -Dtest.app.group.id=com.example \
+  -Dtest.app.version=2.0.0
+```
+
+### Maven repository configuration
+
+```bash
+mvn test \
+  -Dtest.maven.repository=https://repository.example.com/maven2 \
+  -Dtest.maven.repository.id=custom-repo \
+  -Dtest.maven.extra.args="-U -X"
+```
+
+### Vault credentials
+
+```bash
+mvn test \
+  -Dtest.credentials.vault.address=https://vault.example.com \
+  -Dtest.credentials.vault.token=hvs.CAESIJ... \
+  -Dtest.credentials.vault.path.pattern=/secret/data/tnb/
+```
+
+### Debug mode
+
+```bash
+mvn test \
+  -Dtnb.app.debug=true \
+  -Dtnb.app.debug.port=5005
+```
+
+<Info>
+  When running in debug mode, the test application will wait for a debugger to attach on the specified port before proceeding.
+</Info>
+
+### Parallel execution with namespace isolation
+
+```bash
+mvn test \
+  -Dtest.parallel=true \
+  -Dtest.use.openshift=true
+```
+
+<Note>
+  When parallel mode is enabled, namespaces will automatically get a random suffix to avoid conflicts.
+</Note>
+
+### Access in Java code
+
+```java
+import software.tnb.common.config.TestConfiguration;
+import software.tnb.common.product.ProductType;
+
+public class MyTest {
+    @Test
+    public void testConfiguration() {
+        ProductType product = TestConfiguration.product();
+        String groupId = TestConfiguration.appGroupId();
+        Duration waitTime = TestConfiguration.testWaitTime();
+        
+        if (TestConfiguration.appDebug()) {
+            System.out.println("Debug port: " + TestConfiguration.appDebugPort());
+        }
+    }
+}
+```

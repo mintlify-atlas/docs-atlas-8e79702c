@@ -1,0 +1,232 @@
+---
+title: ReusableOpenshiftDeployable
+description: Interface for reusing OpenShift deployments across multiple tests
+---
+
+The `ReusableOpenshiftDeployable` interface enables resource reuse between test classes to avoid the overhead of repeated deployments and undeployments. Instead of tearing down services after each test class, they remain deployed and are cleaned up between tests.
+
+## Interface signature
+
+```java
+public interface ReusableOpenshiftDeployable extends OpenshiftDeployable
+```
+
+This interface extends [OpenshiftDeployable](/api/openshift-deployable) and modifies the lifecycle to support reuse.
+
+## Required methods
+
+<ParamField path="cleanup()" type="void" required>
+  Cleans up the service state between test runs without undeploying it. This should reset the service to a clean state (e.g., delete database tables, remove files, clear queues).
+  
+  ```java
+  void cleanup();
+  ```
+</ParamField>
+
+<Note>
+  The `cleanup()` method should be idempotent and safe to call multiple times.
+</Note>
+
+## Default methods
+
+### beforeAll()
+
+Executed before each test class. Deploys the service if not already deployed and opens resources.
+
+```java
+default void beforeAll(ExtensionContext extensionContext) throws Exception {
+    // Deploy does "deploy" (if it is not already deployed) + wait until it's ready
+    deploy();
+    openResources();
+}
+```
+
+<Info>
+  The `deploy()` method checks if the service is already deployed before attempting deployment, enabling reuse.
+</Info>
+
+### afterAll()
+
+Executed after each test class. Only undeploys if this is the last test that needs the resource.
+
+```java
+default void afterAll(ExtensionContext extensionContext) throws Exception {
+    if (JUnitUtils.isExtensionStillNeeded(extensionContext, this.getClass())) {
+        cleanup();
+        closeResources();
+    } else {
+        OpenshiftDeployable.super.afterAll(extensionContext);
+    }
+}
+```
+
+**Behavior:**
+1. If more tests need this resource: Call `cleanup()` and `closeResources()` but keep the deployment
+2. If this is the last test: Call the parent `afterAll()` to fully undeploy
+
+## The reuse pattern
+
+The reusable deployment pattern optimizes test execution by:
+
+1. **First test class**: Deploys the service to OpenShift
+2. **Subsequent test classes**: Reuse the existing deployment
+3. **Between tests**: Call `cleanup()` to reset state
+4. **Last test class**: Undeploy the service
+
+```
+Test Class A          Test Class B          Test Class C
+     |                     |                     |
+  deploy()             (reuse)               (reuse)
+     |                     |                     |
+  tests run            tests run             tests run
+     |                     |                     |
+  cleanup()            cleanup()             undeploy()
+```
+
+## Example implementation
+
+Here's a reusable PostgreSQL deployment:
+
+```java
+public class OpenshiftPostgreSQL implements ReusableOpenshiftDeployable, WithName {
+    private static final String NAME = "postgresql";
+    private Connection connection;
+    
+    @Override
+    public String name() {
+        return NAME;
+    }
+    
+    @Override
+    public void create() {
+        // Create PostgreSQL deployment in OpenShift
+        OpenshiftClient.get().apps().deployments()
+            .createOrReplace(new DeploymentBuilder()
+                .withNewMetadata()
+                    .withName(NAME)
+                .endMetadata()
+                .withNewSpec()
+                    .withReplicas(1)
+                    .withNewTemplate()
+                        .withNewSpec()
+                            .addNewContainer()
+                                .withName("postgresql")
+                                .withImage("postgres:15")
+                                .addNewPort()
+                                    .withContainerPort(5432)
+                                .endPort()
+                            .endContainer()
+                        .endSpec()
+                    .endTemplate()
+                .endSpec()
+                .build());
+    }
+    
+    @Override
+    public void cleanup() {
+        // Delete all data from the database
+        try (Statement stmt = connection.createStatement()) {
+            stmt.execute("DROP SCHEMA public CASCADE");
+            stmt.execute("CREATE SCHEMA public");
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to cleanup database", e);
+        }
+    }
+    
+    @Override
+    public void openResources() {
+        // Initialize connection to the database
+        String jdbcUrl = String.format(
+            "jdbc:postgresql://%s:5432/postgres",
+            inClusterHostname()
+        );
+        connection = DriverManager.getConnection(jdbcUrl, "user", "password");
+    }
+    
+    @Override
+    public void closeResources() {
+        if (connection != null) {
+            connection.close();
+        }
+    }
+    
+    @Override
+    public Predicate<Pod> podSelector() {
+        return WithName.super.podSelector();
+    }
+    
+    public Connection getConnection() {
+        return connection;
+    }
+}
+```
+
+## Usage in tests
+
+```java
+public class DatabaseTest1 {
+    @RegisterExtension
+    static OpenshiftPostgreSQL postgres = new OpenshiftPostgreSQL();
+    
+    @Test
+    void testOperation1() {
+        // First test class - deploys PostgreSQL
+        Connection conn = postgres.getConnection();
+        // ... perform test operations
+    }
+}
+
+public class DatabaseTest2 {
+    @RegisterExtension
+    static OpenshiftPostgreSQL postgres = new OpenshiftPostgreSQL();
+    
+    @Test
+    void testOperation2() {
+        // Second test class - reuses existing PostgreSQL deployment
+        Connection conn = postgres.getConnection();
+        // ... perform test operations
+    }
+}
+```
+
+## When to use reusable deployments
+
+<CardGroup cols={2}>
+  <Card title="Slow deployments" icon="clock">
+    Services that take significant time to deploy (databases, message brokers)
+  </Card>
+  <Card title="Multiple test classes" icon="files">
+    When many test classes need the same service
+  </Card>
+  <Card title="Stateful services" icon="database">
+    Services where cleanup is cheaper than redeployment
+  </Card>
+  <Card title="Resource limits" icon="memory">
+    Environments with limited resources or quotas
+  </Card>
+</CardGroup>
+
+<Warning>
+  Ensure your `cleanup()` implementation thoroughly resets service state. Incomplete cleanup can cause test pollution and flaky tests.
+</Warning>
+
+## Performance benefits
+
+Reusing deployments can significantly reduce test execution time:
+
+```
+Traditional approach (5 test classes):
+  Deploy (30s) + Test (10s) + Undeploy (10s) = 50s per class
+  Total: 250s
+
+Reusable approach (5 test classes):
+  Deploy (30s) + Test (10s) + Cleanup (2s) = 42s for first class
+  Reuse + Test (10s) + Cleanup (2s) = 12s for subsequent classes
+  Total: 90s (64% faster)
+```
+
+## Related interfaces
+
+- [OpenshiftDeployable](/api/openshift-deployable) - Base interface for OpenShift deployments
+- [Deployable](/api/deployable) - Base interface for all deployments
+- [WithName](/api/deployment-helpers#withname) - Helper for named resources

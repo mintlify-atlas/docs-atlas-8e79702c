@@ -1,0 +1,207 @@
+---
+title: RemoteService
+description: Interface for connecting to externally managed services via configuration
+---
+
+The `RemoteService` interface allows tests to connect to services that are hosted externally rather than deployed by the test framework. Configuration is provided through system properties.
+
+## Interface signature
+
+```java
+public interface RemoteService extends Deployable
+```
+
+## How it works
+
+Remote services are enabled by setting a `host` property in the test configuration. When detected, the framework skips deployment and uses the provided connection details instead.
+
+## Default methods
+
+### enabled()
+
+Determines if this remote service is configured and should be used.
+
+```java
+@Override
+default boolean enabled() {
+    return propertyValue("host") != null;
+}
+```
+
+<Info>
+  A remote service is only enabled if the `tnb.<service>.host` property is set.
+</Info>
+
+### priority()
+
+Returns the deployment priority for this service type.
+
+```java
+@Override
+default int priority() {
+    return 2;
+}
+```
+
+Priority determines the order in which services are deployed. Remote services have priority 2, which is higher than container deployments (0) and OpenShift deployments (1).
+
+### deploy()
+
+No-op method since remote services don't require deployment.
+
+```java
+@Override
+default void deploy() {
+    // Remote services are already running externally
+}
+```
+
+### undeploy()
+
+No-op method since remote services aren't managed by the framework.
+
+```java
+@Override
+default void undeploy() {
+    // Remote services are managed externally
+}
+```
+
+### propertyValue()
+
+Retrieves configuration property values for this service.
+
+```java
+default String propertyValue(String prop) {
+    return propertyValue(prop, null);
+}
+
+default String propertyValue(String prop, String def) {
+    return TestConfiguration.getProperty(
+        String.format("tnb.%s.%s", 
+            ReflectionUtil.getSuperClassName(this.getClass()).toLowerCase(), 
+            prop), 
+        def
+    );
+}
+```
+
+**Parameters:**
+- `prop` - The property name (e.g., "host", "port", "username")
+- `def` - Default value if property is not set
+
+**Example properties:**
+```properties
+tnb.postgresql.host=db.example.com
+tnb.postgresql.port=5432
+tnb.postgresql.username=admin
+tnb.postgresql.password=secret
+```
+
+### host()
+
+Convenience method to retrieve the host property.
+
+```java
+default String host() {
+    return propertyValue("host");
+}
+```
+
+### getLogs()
+
+Logs are not available for remote services.
+
+```java
+default String getLogs() {
+    LOG.warn("getLogs method not supported in RemoteService, returning an empty string");
+    return "";
+}
+```
+
+<Note>
+  Since remote services are managed externally, the framework cannot access their logs.
+</Note>
+
+## Example implementation
+
+Here's a remote PostgreSQL service implementation:
+
+```java
+public class RemotePostgreSQL implements RemoteService {
+    private Connection connection;
+    
+    @Override
+    public void openResources() {
+        String host = host();
+        String port = propertyValue("port", "5432");
+        String database = propertyValue("database", "postgres");
+        String username = propertyValue("username", "postgres");
+        String password = propertyValue("password");
+        
+        String jdbcUrl = String.format(
+            "jdbc:postgresql://%s:%s/%s", 
+            host, port, database
+        );
+        
+        connection = DriverManager.getConnection(jdbcUrl, username, password);
+    }
+    
+    @Override
+    public void closeResources() {
+        if (connection != null) {
+            connection.close();
+        }
+    }
+    
+    public Connection getConnection() {
+        return connection;
+    }
+}
+```
+
+## Configuration example
+
+Enable the remote service by setting system properties:
+
+```bash
+# Run tests with remote PostgreSQL
+mvn test \
+  -Dtnb.postgresql.host=db.example.com \
+  -Dtnb.postgresql.port=5432 \
+  -Dtnb.postgresql.username=testuser \
+  -Dtnb.postgresql.password=testpass
+```
+
+Or in a properties file:
+
+```properties
+# test.properties
+tnb.postgresql.host=db.example.com
+tnb.postgresql.port=5432
+tnb.postgresql.username=testuser
+tnb.postgresql.password=testpass
+```
+
+## Use cases
+
+<CardGroup cols={2}>
+  <Card title="Shared test environment" icon="server">
+    Connect to a centralized test database used across teams
+  </Card>
+  <Card title="CI/CD pipelines" icon="code-branch">
+    Use managed services in cloud environments
+  </Card>
+  <Card title="Performance testing" icon="gauge">
+    Test against production-like infrastructure
+  </Card>
+  <Card title="External dependencies" icon="plug">
+    Connect to third-party services that can't be containerized
+  </Card>
+</CardGroup>
+
+## Related interfaces
+
+- [Deployable](/api/deployable) - Base interface for all deployments
+- [ContainerDeployable](/api/container-deployable) - For local container deployments
+- [OpenshiftDeployable](/api/openshift-deployable) - For OpenShift deployments

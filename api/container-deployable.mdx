@@ -1,0 +1,126 @@
+---
+title: ContainerDeployable
+description: Interface for container-based deployments using Testcontainers
+---
+
+The `ContainerDeployable` interface provides automated lifecycle management for services deployed as Docker containers using the Testcontainers framework.
+
+## Interface signature
+
+```java
+public interface ContainerDeployable<T extends GenericContainer<?>> extends Deployable
+```
+
+This interface uses a generic type parameter to specify the Testcontainers container type being managed.
+
+## Required methods
+
+<ParamField path="container()" type="T extends GenericContainer<?>" required>
+  Returns the Testcontainers GenericContainer instance that this deployment manages. Implementations must provide the specific container instance.
+  
+  ```java
+  T container();
+  ```
+</ParamField>
+
+## Default methods
+
+### deploy()
+
+Starts the container and logs deployment status.
+
+```java
+default void deploy() {
+    LOG.info("Starting {} container", serviceName());
+    container().start();
+    LOG.info("{} container started", serviceName());
+}
+```
+
+<Info>
+  The service name is automatically derived from the implementing class name by removing the "Local" prefix.
+</Info>
+
+### undeploy()
+
+Stops the container if it's currently running.
+
+```java
+default void undeploy() {
+    if (container().isRunning()) {
+        LOG.info("Stopping {} container", serviceName());
+        container().stop();
+        LOG.info("{} container stopped", serviceName());
+    }
+}
+```
+
+### getLogs()
+
+Retrieves the container logs for debugging purposes.
+
+```java
+default String getLogs() {
+    return container().getLogs();
+}
+```
+
+## Example implementation
+
+Here's how to implement a PostgreSQL service using `ContainerDeployable`:
+
+```java
+public class LocalPostgreSQL implements ContainerDeployable<PostgreSQLContainer<?>> {
+    private PostgreSQLContainer<?> container;
+    
+    @Override
+    public PostgreSQLContainer<?> container() {
+        if (container == null) {
+            container = new PostgreSQLContainer<>("postgres:15")
+                .withDatabaseName("testdb")
+                .withUsername("user")
+                .withPassword("password");
+        }
+        return container;
+    }
+    
+    @Override
+    public void openResources() {
+        // Initialize database client or connection pool
+    }
+    
+    @Override
+    public void closeResources() {
+        // Close database connections
+    }
+    
+    public String getJdbcUrl() {
+        return container().getJdbcUrl();
+    }
+}
+```
+
+## Usage in tests
+
+Register the deployment as a JUnit extension:
+
+```java
+@RegisterExtension
+static LocalPostgreSQL postgres = new LocalPostgreSQL();
+
+@Test
+void testDatabaseConnection() {
+    String jdbcUrl = postgres.getJdbcUrl();
+    // Use the database in your test
+}
+```
+
+<Note>
+  The `ContainerDeployable` interface extends `Deployable`, which implements JUnit's `BeforeAllCallback` and `AfterAllCallback`. This ensures containers are automatically started before tests and stopped afterward.
+</Note>
+
+## Related interfaces
+
+- [Deployable](/api/deployable) - Base interface for all deployments
+- [OpenshiftDeployable](/api/openshift-deployable) - For OpenShift-based deployments
+- [RemoteService](/api/remote-service) - For external service connections

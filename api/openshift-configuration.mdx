@@ -1,0 +1,296 @@
+---
+title: OpenShift configuration
+description: Configure OpenShift connections, namespaces, and deployment strategies
+---
+
+The `OpenshiftConfiguration` class provides configuration for OpenShift cluster connections, namespace management, and deployment strategies. All configuration is done through system properties.
+
+## Property constants
+
+### Basic OpenShift settings
+
+<ParamField path="test.use.openshift" type="boolean" default="false">
+  Enable OpenShift deployment for tests
+</ParamField>
+
+<ParamField path="test.use.microshift" type="boolean" default="false">
+  Use Microshift instead of full OpenShift
+</ParamField>
+
+<ParamField path="openshift.url" type="string" required>
+  OpenShift cluster API URL (e.g., https://api.cluster.example.com:6443)
+</ParamField>
+
+<ParamField path="openshift.username" type="string" default="admin">
+  Username for OpenShift authentication
+</ParamField>
+
+<ParamField path="openshift.password" type="string" default="admin">
+  Password for OpenShift authentication
+</ParamField>
+
+<ParamField path="openshift.https.proxy" type="string">
+  HTTPS proxy for OpenShift API requests
+</ParamField>
+
+### Namespace configuration
+
+<ParamField path="openshift.namespace" type="string">
+  OpenShift namespace/project name. If not set, a random namespace with prefix `tnb-test-` will be generated
+</ParamField>
+
+<ParamField path="openshift.namespace.autoset" type="boolean" default="false">
+  Automatically set the namespace without user confirmation
+</ParamField>
+
+<ParamField path="openshift.namespace.delete" type="boolean" default="false">
+  Delete the namespace after test completion. Automatically true if namespace is auto-generated or parallel mode is enabled
+</ParamField>
+
+### Kubeconfig
+
+<ParamField path="openshift.kubeconfig" type="string">
+  Path to kubeconfig file for OpenShift authentication. Takes precedence over `kubeconfig`
+</ParamField>
+
+<ParamField path="kubeconfig" type="string">
+  Alternative path to kubeconfig file
+</ParamField>
+
+### Deployment configuration
+
+<ParamField path="openshift.deployment.label" type="string" default="app">
+  Label used to identify application deployments
+</ParamField>
+
+<ParamField path="openshift.deploy.strategy" type="string" default="jkube">
+  Deployment strategy to use (e.g., jkube, s2i)
+</ParamField>
+
+### XTF integration
+
+<ParamField path="xtf.openshift.master.kubeconfig" type="string">
+  Kubeconfig path for XTF (eXtended Test Framework) integration
+</ParamField>
+
+<ParamField path="xtf.openshift.url" type="string">
+  OpenShift URL for XTF integration
+</ParamField>
+
+## Public methods
+
+### Cluster connection
+
+```java
+public static boolean isOpenshift()
+```
+Returns true if OpenShift deployment is enabled via `test.use.openshift`.
+
+```java
+public static boolean isMicroshift()
+```
+Returns true if Microshift is being used instead of OpenShift.
+
+```java
+public static String openshiftUrl()
+```
+Returns the OpenShift cluster API URL.
+
+```java
+public static String openshiftUsername()
+```
+Returns the username for authentication (default: "admin").
+
+```java
+public static String openshiftPassword()
+```
+Returns the password for authentication (default: "admin").
+
+```java
+public static String openshiftHttpsProxy()
+```
+Returns the HTTPS proxy for OpenShift API requests, or null if not configured.
+
+### Namespace management
+
+```java
+@Deprecated
+public static String openshiftNamespace()
+```
+Returns the OpenShift namespace. If not configured, generates a random namespace with prefix `tnb-test-`. In parallel mode, appends a random suffix to the configured namespace.
+
+<Note>
+  This method is deprecated and should only be used when initializing the OpenShift client. Use `OpenshiftClient.get().getNamespace()` to get the current namespace.
+</Note>
+
+```java
+public static boolean openshiftNamespaceAutoSet()
+```
+Returns true if namespace should be set automatically.
+
+```java
+public static boolean openshiftNamespaceDelete()
+```
+Returns true if the namespace should be deleted after tests. Always true if the namespace was auto-generated or parallel mode is enabled.
+
+### Kubeconfig
+
+```java
+public static Path openshiftKubeconfig()
+```
+Returns the path to the kubeconfig file, checking `openshift.kubeconfig` first, then `kubeconfig`. Returns null if neither is set.
+
+### Deployment
+
+```java
+public static String openshiftDeploymentLabel()
+```
+Returns the label used for deployment identification (default: "app").
+
+```java
+public static String getDeployStrategy()
+```
+Returns the deployment strategy (default: "jkube").
+
+### XTF integration
+
+```java
+public static String xtfOpenshiftKubeconfig()
+public static String xtfOpenshiftUrl()
+```
+Returns XTF-specific configuration values.
+
+## Usage examples
+
+### Basic OpenShift connection
+
+```bash
+mvn test \
+  -Dtest.use.openshift=true \
+  -Dopenshift.url=https://api.ocp.example.com:6443 \
+  -Dopenshift.username=developer \
+  -Dopenshift.password=mypassword
+```
+
+### Using kubeconfig
+
+```bash
+mvn test \
+  -Dtest.use.openshift=true \
+  -Dopenshift.kubeconfig=/home/user/.kube/config
+```
+
+<Info>
+  When using kubeconfig, username and password are not required. The client will use the current context from the kubeconfig file.
+</Info>
+
+### Custom namespace with cleanup
+
+```bash
+mvn test \
+  -Dtest.use.openshift=true \
+  -Dopenshift.namespace=my-test-project \
+  -Dopenshift.namespace.delete=true
+```
+
+### Auto-generated namespace
+
+```bash
+mvn test \
+  -Dtest.use.openshift=true
+```
+
+<Note>
+  When no namespace is specified, TNB generates a random namespace with format `tnb-test-XXXXXXXX` and automatically deletes it after test completion.
+</Note>
+
+### Parallel execution with namespace isolation
+
+```bash
+mvn test \
+  -Dtest.use.openshift=true \
+  -Dtest.parallel=true \
+  -Dopenshift.namespace=myapp-tests
+```
+
+<Info>
+  In parallel mode, each test run appends a random 8-character suffix to the namespace name to prevent conflicts.
+</Info>
+
+### Microshift configuration
+
+```bash
+mvn test \
+  -Dtest.use.microshift=true \
+  -Dopenshift.url=https://localhost:6443 \
+  -Dopenshift.kubeconfig=/var/lib/microshift/resources/kubeadmin/kubeconfig
+```
+
+### Using HTTPS proxy
+
+```bash
+mvn test \
+  -Dtest.use.openshift=true \
+  -Dopenshift.url=https://api.ocp.example.com:6443 \
+  -Dopenshift.https.proxy=http://proxy.example.com:8080
+```
+
+### Custom deployment strategy
+
+```bash
+mvn test \
+  -Dtest.use.openshift=true \
+  -Dopenshift.deploy.strategy=s2i
+```
+
+### Access in Java code
+
+```java
+import software.tnb.common.config.OpenshiftConfiguration;
+
+public class MyTest {
+    @Test
+    public void testOpenshiftDeployment() {
+        if (OpenshiftConfiguration.isOpenshift()) {
+            String url = OpenshiftConfiguration.openshiftUrl();
+            String strategy = OpenshiftConfiguration.getDeployStrategy();
+            
+            System.out.println("Deploying to: " + url);
+            System.out.println("Using strategy: " + strategy);
+            
+            if (OpenshiftConfiguration.openshiftNamespaceDelete()) {
+                System.out.println("Namespace will be cleaned up after tests");
+            }
+        }
+    }
+}
+```
+
+### Complete example with all options
+
+<Tabs>
+  <Tab title="Using credentials">
+    ```bash
+    mvn test \
+      -Dtest.use.openshift=true \
+      -Dopenshift.url=https://api.ocp4.example.com:6443 \
+      -Dopenshift.username=testuser \
+      -Dopenshift.password=secret123 \
+      -Dopenshift.namespace=tnb-integration-tests \
+      -Dopenshift.namespace.delete=true \
+      -Dopenshift.deploy.strategy=jkube \
+      -Dopenshift.deployment.label=app.kubernetes.io/name
+    ```
+  </Tab>
+  
+  <Tab title="Using kubeconfig">
+    ```bash
+    mvn test \
+      -Dtest.use.openshift=true \
+      -Dopenshift.kubeconfig=~/.kube/ocp-cluster \
+      -Dopenshift.namespace=tnb-integration-tests \
+      -Dopenshift.namespace.autoset=true \
+      -Dopenshift.deploy.strategy=jkube
+    ```
+  </Tab>
+</Tabs>

@@ -1,0 +1,393 @@
+---
+title: Product configuration
+description: Configure Camel Quarkus and Camel Spring Boot product versions and dependencies
+---
+
+The `QuarkusConfiguration` and `SpringBootConfiguration` classes provide configuration for Camel Quarkus and Camel Spring Boot product versions, platform BOMs, and build settings.
+
+## Quarkus configuration
+
+The `QuarkusConfiguration` class manages Camel Quarkus and Quarkus platform configuration.
+
+### Property constants
+
+#### Version properties
+
+<ParamField path="camel-quarkus.version" type="string" default="3.26.0">
+  Camel Quarkus version to use
+</ParamField>
+
+<ParamField path="quarkus.version" type="string" default="3.26.0">
+  Quarkus platform version
+</ParamField>
+
+<ParamField path="quarkus.native" type="boolean" default="false">
+  Enable native compilation with GraalVM
+</ParamField>
+
+#### Platform BOM properties
+
+<ParamField path="quarkus.platform.group-id" type="string" default="io.quarkus">
+  Group ID for Quarkus platform BOM
+</ParamField>
+
+<ParamField path="quarkus.platform.artifact-id" type="string" default="quarkus-bom">
+  Artifact ID for Quarkus platform BOM
+</ParamField>
+
+<ParamField path="quarkus.platform.version" type="string">
+  Quarkus platform BOM version (overrides quarkus.version)
+</ParamField>
+
+<ParamField path="camel-quarkus.platform.group-id" type="string" default="org.apache.camel.quarkus">
+  Group ID for Camel Quarkus platform BOM
+</ParamField>
+
+<ParamField path="camel-quarkus.platform.artifact-id" type="string" default="camel-quarkus-bom">
+  Artifact ID for Camel Quarkus platform BOM
+</ParamField>
+
+<ParamField path="camel-quarkus.platform.version" type="string">
+  Camel Quarkus platform BOM version
+</ParamField>
+
+#### Examples repository
+
+<ParamField path="camel.quarkus.examples.repo" type="string" default="https://github.com/apache/camel-quarkus-examples">
+  Git repository URL for Camel Quarkus examples
+</ParamField>
+
+<ParamField path="camel.quarkus.examples.branch" type="string" default="main">
+  Git branch for Camel Quarkus examples
+</ParamField>
+
+### Public methods
+
+```java
+public static String quarkusVersion()
+public static String camelQuarkusVersion()
+public static boolean isQuarkusNative()
+```
+Retrieve version and build configuration.
+
+```java
+public static String quarkusPlatformGroupId()
+public static String quarkusPlatformArtifactId()
+public static String quarkusPlatformVersion()
+```
+Access Quarkus platform BOM coordinates.
+
+```java
+public static String camelQuarkusPlatformGroupId()
+public static String camelQuarkusPlatformArtifactId()
+public static String camelQuarkusPlatformVersion()
+```
+Access Camel Quarkus platform BOM coordinates.
+
+```java
+public static String getCamelQuarkusExamplesRepo()
+public static String getCamelQuarkusExamplesBranch()
+```
+Retrieve examples repository information.
+
+```java
+public static Map<String, String> fromSystemProperties()
+```
+Collects all system properties starting with "quarkus." and returns them as a map, excluding internal properties defined in the `ignoredQuarkusProperties` set.
+
+<Note>
+  The `fromSystemProperties()` method allows you to pass custom Quarkus properties to Maven builds globally. Properties like `quarkus.version`, `quarkus.native`, and platform coordinates are filtered out.
+</Note>
+
+### Usage examples
+
+#### Basic Quarkus version configuration
+
+```bash
+mvn test \
+  -Dtest.product=CAMEL_QUARKUS \
+  -Dcamel-quarkus.version=3.26.0 \
+  -Dquarkus.version=3.26.0
+```
+
+#### Native build
+
+```bash
+mvn test \
+  -Dtest.product=CAMEL_QUARKUS \
+  -Dquarkus.native=true
+```
+
+<Info>
+  Native compilation requires GraalVM to be installed and configured. The build process will take significantly longer than JVM mode.
+</Info>
+
+#### Custom platform BOM
+
+```bash
+mvn test \
+  -Dcamel-quarkus.platform.group-id=com.redhat.quarkus.platform \
+  -Dcamel-quarkus.platform.artifact-id=quarkus-camel-bom \
+  -Dcamel-quarkus.platform.version=3.2.0.redhat-00001
+```
+
+#### Pass custom Quarkus properties
+
+```bash
+mvn test \
+  -Dquarkus.http.port=8081 \
+  -Dquarkus.log.level=DEBUG \
+  -Dquarkus.datasource.db-kind=postgresql
+```
+
+<Note>
+  Any system property starting with "quarkus." (except the reserved ones) will be automatically collected by `fromSystemProperties()` and passed to the Maven build.
+</Note>
+
+## Spring Boot configuration
+
+The `SpringBootConfiguration` class manages Camel Spring Boot and Spring Boot platform configuration.
+
+### Property constants
+
+#### Version properties
+
+<ParamField path="springboot.version" type="string" default="3.5.5">
+  Spring Boot version to use
+</ParamField>
+
+<ParamField path="camel.springboot.version" type="string" default="4.14.0">
+  Camel Spring Boot version
+</ParamField>
+
+#### Platform BOM properties
+
+<ParamField path="springboot.platform.group.id" type="string" default="org.springframework.boot">
+  Group ID for Spring Boot platform BOM
+</ParamField>
+
+<ParamField path="springboot.platform.artifact.id" type="string" default="spring-boot-dependencies">
+  Artifact ID for Spring Boot platform BOM
+</ParamField>
+
+<ParamField path="camel.springboot.platform.group.id" type="string" default="org.apache.camel.springboot">
+  Group ID for Camel Spring Boot platform BOM
+</ParamField>
+
+<ParamField path="camel.springboot.platform.artifact.id" type="string" default="camel-spring-boot-dependencies">
+  Artifact ID for Camel Spring Boot platform BOM
+</ParamField>
+
+#### Archetype properties
+
+<ParamField path="camel.springboot.archetype.group.id" type="string" default="org.apache.camel.archetypes">
+  Group ID for Camel Spring Boot archetype
+</ParamField>
+
+<ParamField path="camel.springboot.archetype.artifact.id" type="string" default="camel-archetype-spring-boot">
+  Artifact ID for Camel Spring Boot archetype
+</ParamField>
+
+<ParamField path="camel.springboot.archetype.version" type="string">
+  Archetype version (defaults to camel.springboot.version)
+</ParamField>
+
+<ParamField path="camel.springboot.archetype.generated.version" type="string">
+  Version to set in generated projects from archetype
+</ParamField>
+
+#### Examples repository
+
+<ParamField path="camel.springboot.examples.repo" type="string" default="https://github.com/apache/camel-spring-boot-examples">
+  Git repository URL for Camel Spring Boot examples
+</ParamField>
+
+<ParamField path="camel.springboot.examples.branch" type="string">
+  Git branch for examples (defaults to camel.springboot.version)
+</ParamField>
+
+#### OpenShift Maven plugin
+
+<ParamField path="openshift-maven-plugin-group-id" type="string" default="org.eclipse.jkube">
+  Group ID for OpenShift Maven plugin
+</ParamField>
+
+<ParamField path="openshift-maven-plugin-artifact-id" type="string" default="openshift-maven-plugin">
+  Artifact ID for OpenShift Maven plugin
+</ParamField>
+
+<ParamField path="openshift-maven-plugin-version" type="string" default="1.13.1">
+  OpenShift Maven plugin version (auto-fetches latest from GitHub releases)
+</ParamField>
+
+<ParamField path="maven-compiler-plugin-version" type="string" default="3.8.1">
+  Maven compiler plugin version
+</ParamField>
+
+#### OpenShift deployment
+
+<ParamField path="openshift-sb-base-image" type="string" default="registry.access.redhat.com/ubi8/openjdk-11:latest">
+  Base container image for Spring Boot applications
+</ParamField>
+
+<ParamField path="openshift-sb.result-image.repo" type="string">
+  Repository for the generated container image (required for JKubeWithExternalRepoStrategy)
+</ParamField>
+
+<ParamField path="openshift-sb.deployment.force" type="boolean" default="true">
+  Force creation of Deployment instead of DeploymentConfig (sets jkube.build.switchToDeployment)
+</ParamField>
+
+### Public methods
+
+```java
+public static String springBootVersion()
+public static String camelSpringBootVersion()
+```
+Retrieve version configuration.
+
+```java
+public static String springBootPlatformGroupId()
+public static String springBootPlatformArtifactId()
+public static String camelPlatformGroupId()
+public static String camelPlatformArtifactId()
+```
+Access platform BOM coordinates.
+
+```java
+public static String camelSpringBootArchetypeGroupId()
+public static String camelSpringBootArchetypeArtifactId()
+public static String camelSpringBootArchetypeVersion()
+```
+Retrieve archetype configuration.
+
+```java
+public static String getCamelSpringbootExamplesRepo()
+public static String camelSpringBootExamplesBranch()
+```
+Access examples repository information.
+
+```java
+public static String openshiftMavenPluginGroupId()
+public static String openshiftMavenPluginArtifactId()
+public static String openshiftMavenPluginVersion()
+public static String mavenCompilerPluginVersion()
+```
+Retrieve Maven plugin configuration.
+
+```java
+public static String openshiftBaseImage()
+public static String openshiftResultImageRepository()
+public static boolean forceOpenshiftDeployment()
+```
+Access OpenShift deployment configuration.
+
+### Usage examples
+
+#### Basic Spring Boot version configuration
+
+```bash
+mvn test \
+  -Dtest.product=CAMEL_SPRINGBOOT \
+  -Dcamel.springboot.version=4.14.0 \
+  -Dspringboot.version=3.5.5
+```
+
+#### Custom platform BOM
+
+```bash
+mvn test \
+  -Dspringboot.platform.group.id=com.example \
+  -Dspringboot.platform.artifact.id=custom-spring-boot-bom \
+  -Dcamel.springboot.platform.group.id=com.example \
+  -Dcamel.springboot.platform.artifact.id=custom-camel-bom
+```
+
+#### OpenShift deployment configuration
+
+```bash
+mvn test \
+  -Dtest.use.openshift=true \
+  -Dopenshift-sb-base-image=registry.access.redhat.com/ubi9/openjdk-17:latest \
+  -Dopenshift-sb.result-image.repo=quay.io/myorg/myapp \
+  -Dopenshift-sb.deployment.force=true
+```
+
+<Info>
+  When `openshift-sb.deployment.force` is true, JKube will create a Kubernetes Deployment instead of an OpenShift DeploymentConfig.
+</Info>
+
+#### Using custom archetype
+
+```bash
+mvn archetype:generate \
+  -DarchetypeGroupId=$(echo "org.apache.camel.archetypes") \
+  -DarchetypeArtifactId=$(echo "camel-archetype-spring-boot") \
+  -DarchetypeVersion=4.14.0
+```
+
+## Complete configuration example
+
+<Tabs>
+  <Tab title="Camel Quarkus">
+    ```bash
+    mvn test \
+      -Dtest.product=CAMEL_QUARKUS \
+      -Dtest.use.openshift=true \
+      -Dcamel-quarkus.version=3.26.0 \
+      -Dquarkus.version=3.26.0 \
+      -Dquarkus.native=false \
+      -Dcamel-quarkus.platform.group-id=org.apache.camel.quarkus \
+      -Dcamel-quarkus.platform.artifact-id=camel-quarkus-bom \
+      -Dquarkus.http.port=8080 \
+      -Dquarkus.log.level=INFO
+    ```
+  </Tab>
+  
+  <Tab title="Camel Spring Boot">
+    ```bash
+    mvn test \
+      -Dtest.product=CAMEL_SPRINGBOOT \
+      -Dtest.use.openshift=true \
+      -Dcamel.springboot.version=4.14.0 \
+      -Dspringboot.version=3.5.5 \
+      -Dopenshift-maven-plugin-version=1.13.1 \
+      -Dopenshift-sb-base-image=registry.access.redhat.com/ubi8/openjdk-11:latest \
+      -Dopenshift-sb.result-image.repo=quay.io/fuse-qe/test-app \
+      -Dopenshift-sb.deployment.force=true
+    ```
+  </Tab>
+</Tabs>
+
+## Access in Java code
+
+```java
+import software.tnb.product.cq.configuration.QuarkusConfiguration;
+import software.tnb.product.csb.configuration.SpringBootConfiguration;
+import software.tnb.common.config.TestConfiguration;
+
+public class ProductConfigTest {
+    @Test
+    public void testProductConfiguration() {
+        if (TestConfiguration.product() == ProductType.CAMEL_QUARKUS) {
+            String version = QuarkusConfiguration.camelQuarkusVersion();
+            boolean isNative = QuarkusConfiguration.isQuarkusNative();
+            
+            System.out.println("Camel Quarkus version: " + version);
+            System.out.println("Native build: " + isNative);
+            
+            // Get custom Quarkus properties
+            Map<String, String> customProps = QuarkusConfiguration.fromSystemProperties();
+            customProps.forEach((k, v) -> 
+                System.out.println(k + " = " + v)
+            );
+        } else if (TestConfiguration.product() == ProductType.CAMEL_SPRINGBOOT) {
+            String version = SpringBootConfiguration.camelSpringBootVersion();
+            String baseImage = SpringBootConfiguration.openshiftBaseImage();
+            
+            System.out.println("Camel Spring Boot version: " + version);
+            System.out.println("Base image: " + baseImage);
+        }
+    }
+}
+```
