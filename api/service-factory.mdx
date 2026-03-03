@@ -1,0 +1,187 @@
+---
+title: ServiceFactory
+description: Factory class for creating and managing Service instances
+---
+
+## Overview
+
+`ServiceFactory` is a utility class that provides static methods for creating and managing Service instances. It handles service instantiation, configuration, and lifecycle management using Java's ServiceLoader mechanism.
+
+<Note>
+  ServiceFactory automatically selects the appropriate service implementation based on the environment (local or OpenShift) and implementation priorities.
+</Note>
+
+## Class signature
+
+```java
+public final class ServiceFactory
+```
+
+**Package:** `software.tnb.common.service`
+
+## Methods
+
+### create(Class)
+
+Creates an instance of the specified Service class. If there is only one implementation, it returns that one. Otherwise, it returns a specific implementation for the current environment (local or OpenShift).
+
+```java
+public static <S extends Service<?, ?, ?>> S create(Class<S> clazz)
+```
+
+<ParamField path="clazz" type="Class<S>" required>
+  The Service class to instantiate
+</ParamField>
+
+<ResponseField name="return" type="S">
+  An instance of the requested Service class
+</ResponseField>
+
+**Type parameters:**
+- `S` - Service type that extends `Service<?, ?, ?>`
+
+**Example:**
+
+```java
+// Create a Kafka service instance
+Kafka kafka = ServiceFactory.create(Kafka.class);
+
+// Create a MongoDB service instance
+MongoDB mongoDB = ServiceFactory.create(MongoDB.class);
+```
+
+### create(Class, Consumer)
+
+Creates a ConfigurableService instance with custom configuration applied via a Consumer.
+
+```java
+public static <C extends ServiceConfiguration, S extends ConfigurableService<?, ?, ?, C>> 
+    S create(Class<S> clazz, Consumer<C> config)
+```
+
+<ParamField path="clazz" type="Class<S>" required>
+  The ConfigurableService class to instantiate
+</ParamField>
+
+<ParamField path="config" type="Consumer<C>" required>
+  A Consumer that accepts the service configuration and applies custom settings
+</ParamField>
+
+<ResponseField name="return" type="S">
+  A configured instance of the requested ConfigurableService
+</ResponseField>
+
+**Type parameters:**
+- `C` - Configuration type that extends `ServiceConfiguration`
+- `S` - Service type that extends `ConfigurableService<?, ?, ?, C>`
+
+**Example:**
+
+```java
+// Create SQS service with localstack configuration
+SQS sqs = ServiceFactory.create(SQS.class, 
+    config -> config.useLocalstack(true));
+
+// Create AWS service with custom configuration
+AWSService aws = ServiceFactory.create(AWSService.class, 
+    config -> {
+        config.useLocalstack(false);
+        config.setRegion("us-east-1");
+    });
+```
+
+### withService(Class, Consumer)
+
+Creates a Service instance, executes code with it, and handles lifecycle (beforeAll/afterAll) automatically.
+
+```java
+public static <S extends Service<?, ?, ?>> 
+    void withService(Class<S> clazz, Consumer<S> code)
+```
+
+<ParamField path="clazz" type="Class<S>" required>
+  The Service class to instantiate
+</ParamField>
+
+<ParamField path="code" type="Consumer<S>" required>
+  A Consumer that accepts the service instance and executes operations
+</ParamField>
+
+**Type parameters:**
+- `S` - Service type that extends `Service<?, ?, ?>`
+
+**Example:**
+
+```java
+// Use a service with automatic lifecycle management
+ServiceFactory.withService(Kafka.class, kafka -> {
+    kafka.validation().createTopic("test-topic");
+    // Service is automatically cleaned up after this block
+});
+```
+
+### withService(Class, Consumer, Consumer)
+
+Creates a ConfigurableService instance with custom configuration, executes code with it, and handles lifecycle automatically.
+
+```java
+public static <C extends ServiceConfiguration, S extends ConfigurableService<?, ?, ?, C>> 
+    void withService(Class<S> clazz, Consumer<C> config, Consumer<S> code)
+```
+
+<ParamField path="clazz" type="Class<S>" required>
+  The ConfigurableService class to instantiate
+</ParamField>
+
+<ParamField path="config" type="Consumer<C>" required>
+  A Consumer that configures the service
+</ParamField>
+
+<ParamField path="code" type="Consumer<S>" required>
+  A Consumer that executes operations with the service instance
+</ParamField>
+
+**Type parameters:**
+- `C` - Configuration type that extends `ServiceConfiguration`
+- `S` - Service type that extends `ConfigurableService<?, ?, ?, C>`
+
+**Example:**
+
+```java
+// Use a configurable service with automatic lifecycle
+ServiceFactory.withService(
+    SQS.class,
+    config -> config.useLocalstack(true),
+    sqs -> {
+        sqs.validation().createQueue("test-queue");
+        // Service is automatically configured and cleaned up
+    }
+);
+```
+
+## Service loading mechanism
+
+ServiceFactory uses Java's ServiceLoader to discover and load service implementations:
+
+1. **Single implementation**: If only one implementation exists, it's returned directly
+2. **Multiple implementations**: Services are sorted by priority and filtered by environment
+3. **Environment detection**: Automatically selects local or OpenShift implementations
+4. **Concrete classes**: Instantiated directly using reflection
+
+<Note>
+  For ConfigurableService instances, the factory automatically calls `defaultConfiguration()` after instantiation.
+</Note>
+
+## Error handling
+
+ServiceFactory throws `IllegalArgumentException` in the following cases:
+
+- No implementation found for the requested service class
+- No enabled implementation found for the current environment
+- Failed to instantiate the service class
+
+## Related
+
+- [Service](/api/service) - Base class for all services
+- [ConfigurableService](/api/configurable-service) - Base class for configurable services
+- [AccountFactory](/api/account-factory) - Factory for creating Account instances

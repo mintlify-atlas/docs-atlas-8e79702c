@@ -1,0 +1,146 @@
+---
+title: ProductFactory
+description: Factory class for creating TNB product instances
+---
+
+## Overview
+
+The `ProductFactory` class is a factory utility that creates instances of TNB products based on system properties. It uses Java's `ServiceLoader` mechanism to discover and instantiate the appropriate product implementation (Camel Quarkus, Camel Spring Boot, etc.) for either local or OpenShift environments.
+
+## Class information
+
+**Package:** `software.tnb.product`
+
+**Type:** Final utility class (cannot be instantiated)
+
+## Methods
+
+### create()
+
+Creates an instance of a product based on system properties.
+
+```java
+public static Product create()
+```
+
+#### Returns
+
+<ResponseField name="Product" type="Product">
+  The product instance matching the configured product type and deployment environment
+</ResponseField>
+
+#### Example
+
+```java
+Product product = ProductFactory.create();
+```
+
+<Note>
+This method automatically determines the product type from `TestConfiguration.product()` and whether to create a local or OpenShift instance based on `OpenshiftConfiguration.isOpenshift()`.
+</Note>
+
+---
+
+### create(Class\<P\>)
+
+Creates an instance of a product and returns it as the specified class type.
+
+```java
+public static <P extends Product> P create(Class<P> clazz)
+```
+
+#### Parameters
+
+<ParamField path="clazz" type="Class<P>" required>
+  The class type to cast the product instance to (must extend `Product`)
+</ParamField>
+
+#### Returns
+
+<ResponseField name="P" type="P extends Product">
+  The product instance cast to the specified class type
+</ResponseField>
+
+#### Throws
+
+- `IllegalArgumentException` - If no product implementation is found matching the configuration
+
+#### Example
+
+```java
+// Create and cast to specific product type
+LocalCamelQuarkus product = ProductFactory.create(LocalCamelQuarkus.class);
+```
+
+## How it works
+
+The `ProductFactory` uses the following selection criteria:
+
+1. **Product type matching**: Filters products where the class name contains the configured product value from `TestConfiguration.product()`
+2. **Environment matching**: Ensures the product type matches the deployment environment:
+   - `OpenshiftProduct` implementations for OpenShift environments
+   - Local product implementations for local environments
+3. **ServiceLoader discovery**: Uses Java's `ServiceLoader` to find all available `Product` implementations on the classpath
+
+## Error handling
+
+If no matching product is found, the factory throws an `IllegalArgumentException` with a descriptive message indicating:
+- The configured product type
+- The deployment environment (OpenShift or local)
+
+The exception stacktrace is printed before throwing to aid debugging, as initialization errors may be swallowed by the JVM.
+
+## Usage in tests
+
+<CodeGroup>
+
+```java Basic usage
+@ExtendWith(IntegrationLifecycleManager.class)
+public class MyTest {
+    private Product product = ProductFactory.create();
+    
+    @Test
+    void testIntegration() {
+        App app = product.createIntegration(
+            new IntegrationBuilder("my-integration")
+                .fromRouteBuilder(new MyRouteBuilder())
+        );
+    }
+}
+```
+
+```java Specific product type
+public class SpringBootTest {
+    private OpenshiftCamelSpringBoot product = 
+        ProductFactory.create(OpenshiftCamelSpringBoot.class);
+    
+    @Test
+    void testSpringBootIntegration() {
+        // Product is specifically typed for Spring Boot
+        SpringBootApp app = (SpringBootApp) product.createIntegration(
+            new SpringBootIntegrationBuilder("sb-app")
+                .fromRouteBuilder(new MyRouteBuilder())
+        );
+    }
+}
+```
+
+</CodeGroup>
+
+## Configuration
+
+The factory relies on these system properties:
+
+- **test.product**: Product type identifier (e.g., "quarkus", "springboot")
+- **test.openshift**: Boolean indicating if running on OpenShift
+
+These are typically configured via:
+- Maven profiles
+- System properties (`-Dtest.product=quarkus`)
+- Environment variables
+- Test configuration files
+
+## Related
+
+- [IntegrationBuilder](/api/integration-builder) - Build integrations with the created product
+- [Customizers](/api/customizers) - Customize integration behavior

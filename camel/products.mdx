@@ -1,0 +1,235 @@
+---
+title: Supported products
+description: Products supported by TNB's Camel integration testing framework
+---
+
+TNB supports testing integrations across three Fuse products, each with local and OpenShift deployment capabilities.
+
+## Product types
+
+The framework supports the following products via the `ProductType` enum:
+
+<ParamField path="CAMEL_QUARKUS" type="ProductType">
+  Camel Quarkus integrations running on the Quarkus framework
+  
+  **Value**: `camelquarkus`
+</ParamField>
+
+<ParamField path="CAMEL_SPRINGBOOT" type="ProductType">
+  Camel Spring Boot integrations running on Spring Boot
+  
+  **Value**: `camelspringboot`
+</ParamField>
+
+<ParamField path="CXF_QUARKUS" type="ProductType">
+  Apache CXF on Quarkus for SOAP and REST web services
+  
+  **Value**: `cxfquarkus`
+</ParamField>
+
+## Using products in tests
+
+You can create product instances in two ways:
+
+### Auto-detection
+
+Let TNB determine the product based on system properties:
+
+```java
+import software.tnb.product.ProductFactory;
+import software.tnb.product.Product;
+import org.junit.jupiter.api.extension.RegisterExtension;
+
+public class MyTest {
+    @RegisterExtension
+    public static Product product = ProductFactory.create();
+}
+```
+
+<Info>
+  The product is determined by the `fuse.product` system property (camelspringboot, camelquarkus, cxfquarkus). Deployment location (local vs OpenShift) is determined by the `openshift.url` property.
+</Info>
+
+### Explicit product
+
+Create a specific product instance for product-specific features:
+
+<Tabs>
+  <Tab title="Camel Quarkus">
+    ```java
+    import software.tnb.product.cq.LocalCamelQuarkus;
+    import org.junit.jupiter.api.extension.RegisterExtension;
+    
+    public class QuarkusSpecificTest {
+        @RegisterExtension
+        public static LocalCamelQuarkus cq = ProductFactory.create(LocalCamelQuarkus.class);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Camel Spring Boot">
+    ```java
+    import software.tnb.product.csb.LocalCamelSpringBoot;
+    import org.junit.jupiter.api.extension.RegisterExtension;
+    
+    public class SpringBootSpecificTest {
+        @RegisterExtension
+        public static LocalCamelSpringBoot csb = ProductFactory.create(LocalCamelSpringBoot.class);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="CXF Quarkus">
+    ```java
+    import software.tnb.product.cxf.OpenshiftCxfQuarkus;
+    import org.junit.jupiter.api.extension.RegisterExtension;
+    
+    public class CxfSpecificTest {
+        @RegisterExtension
+        public static OpenshiftCxfQuarkus cxf = ProductFactory.create(OpenshiftCxfQuarkus.class);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Camel Quarkus
+
+Camel Quarkus combines the power of Apache Camel with Quarkus features.
+
+### Integration creation
+
+Application skeleton is generated from the `io.quarkus:quarkus-maven-plugin:<version>:create` Maven plugin, and the integration code is dumped as a Java file in the app skeleton.
+
+### Available classes
+
+- `LocalCamelQuarkus`: Local deployment
+- `OpenshiftCamelQuarkus`: OpenShift deployment
+
+### Example
+
+```java
+import software.tnb.product.integration.builder.IntegrationBuilder;
+import org.apache.camel.builder.RouteBuilder;
+
+public class QuarkusTest {
+    @RegisterExtension
+    public static Product product = ProductFactory.create();
+    
+    @Test
+    public void testQuarkusIntegration() {
+        IntegrationBuilder ib = new IntegrationBuilder("my-integration")
+            .fromRouteBuilder(new RouteBuilder() {
+                @Override
+                public void configure() throws Exception {
+                    from("timer:tick?period=1000")
+                        .log("Tick from Quarkus!");
+                }
+            })
+            .dependencies("timer", "log");
+        
+        product.createIntegration(ib);
+        // Test your integration
+    }
+}
+```
+
+## Camel Spring Boot
+
+Camel Spring Boot provides enterprise integration patterns on the Spring Boot platform.
+
+### Integration creation
+
+Application skeleton is generated from the [camel-spring-boot archetype](https://github.com/apache/camel-spring-boot/tree/main/archetypes/camel-archetype-spring-boot), and the integration code is dumped as a Java file in the app skeleton.
+
+### Available classes
+
+- `LocalCamelSpringBoot`: Local deployment
+- `OpenshiftCamelSpringBoot`: OpenShift deployment
+
+### Spring Boot-specific features
+
+The `SpringBootIntegrationBuilder` extends the base builder with Spring Boot-specific methods:
+
+```java
+import software.tnb.product.csb.integration.builder.SpringBootIntegrationBuilder;
+
+SpringBootIntegrationBuilder ib = new SpringBootIntegrationBuilder("my-sb-integration")
+    .fromSpringBootXmlCamelContext("camel-context.xml") // XML-based routes
+    .useExistingJar(Path.of("/path/to/app.jar")) // Use pre-built JAR
+    .dependencies("timer", "log");
+```
+
+<Note>
+  The `SpringBootIntegrationBuilder` provides methods for XML Camel contexts and using existing JAR files, which are Spring Boot-specific features.
+</Note>
+
+## CXF Quarkus
+
+Apache CXF on Quarkus for building SOAP and RESTful web services.
+
+### Available classes
+
+- `OpenshiftCxfQuarkus`: OpenShift deployment
+
+### Use cases
+
+CXF Quarkus is ideal for:
+
+- SOAP web service integrations
+- REST web service integrations
+- WS-* protocol support
+- Legacy system integration
+
+## Product lifecycle
+
+The `Product` interface extends JUnit 5's `BeforeAllCallback` and `AfterAllCallback`:
+
+```java
+public abstract class Product implements BeforeAllCallback, AfterAllCallback {
+    public App createIntegration(AbstractIntegrationBuilder<?> integrationBuilder) {
+        // Creates and starts the integration
+    }
+    
+    public void removeIntegrations() {
+        // Stops all integrations in reverse order
+    }
+    
+    public abstract void setupProduct();
+    public abstract void teardownProduct();
+}
+```
+
+### Multiple integrations
+
+You can create multiple integrations in a single test:
+
+```java
+Map<String, App> apps = product.createIntegration(
+    new IntegrationBuilder("integration-1")
+        .fromRouteBuilder(routeBuilder1)
+        .dependencies("timer"),
+    new IntegrationBuilder("integration-2")
+        .fromRouteBuilder(routeBuilder2)
+        .dependencies("http")
+);
+```
+
+## System properties
+
+Configure product behavior using system properties:
+
+<ParamField path="fuse.product" type="string" required>
+  Specifies which product to use
+  
+  **Values**: `camelquarkus`, `camelspringboot`, `cxfquarkus`
+</ParamField>
+
+<ParamField path="openshift.url" type="string">
+  OpenShift cluster URL. If present, deploys to OpenShift; otherwise deploys locally
+</ParamField>
+
+<ParamField path="openshift.deploy.strategy" type="string">
+  Deployment strategy for OpenShift
+  
+  **Values**: `JKUBE`, `BINARY`, `DEVFILE`, `CUSTOM`, `JKUBE_EXT_REPO`
+</ParamField>

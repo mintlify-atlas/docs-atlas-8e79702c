@@ -1,0 +1,548 @@
+---
+title: Deployment modes
+description: Understanding local and OpenShift deployment for self-hosted services
+---
+
+## Overview
+
+TNB supports two deployment modes for self-hosted services:
+
+- **Local mode**: Uses TestContainers to run Docker containers on your local machine
+- **OpenShift mode**: Deploys services to an OpenShift cluster
+
+The deployment mode is controlled by the `test.use.openshift` system property.
+
+## Deployment architecture
+
+Self-hosted services use a polymorphic architecture where the correct implementation is selected at runtime:
+
+```
+Kafka (abstract service)
+├── LocalKafka (TestContainers implementation)
+└── OpenshiftKafka (OpenShift implementation)
+```
+
+The `ServiceFactory` automatically selects the appropriate implementation based on:
+
+1. The `test.use.openshift` system property
+2. Implementation priority (OpenShift has higher priority)
+3. Whether the implementation is enabled
+
+<Info>
+You don't need to change your test code when switching between deployment modes - the same test works in both environments.
+</Info>
+
+## Local deployment (TestContainers)
+
+Local deployment uses [TestContainers](https://www.testcontainers.org/) to run Docker containers.
+
+### Configuration
+
+```bash
+test.use.openshift=false
+```
+
+Or omit the property entirely (local is the default).
+
+### How it works
+
+Services implement the `ContainerDeployable` interface:
+
+```java
+public interface ContainerDeployable<T extends GenericContainer<?>> extends Deployable {
+    T container();
+    
+    default void deploy() {
+        LOG.info("Starting {} container", serviceName());
+        container().start();
+        LOG.info("{} container started", serviceName());
+    }
+    
+    default void undeploy() {
+        if (container().isRunning()) {
+            LOG.info("Stopping {} container", serviceName());
+            container().stop();
+            LOG.info("{} container stopped", serviceName());
+        }
+    }
+}
+```
+
+### Example: LocalKafka
+
+From `LocalKafka.java:13-77`:
+
+```java
+@AutoService(Kafka.class)
+public class LocalKafka extends Kafka implements ContainerDeployable<StrimziContainer>, WithDockerImage {
+    
+    private static final Logger LOG = LoggerFactory.getLogger(LocalKafka.class);
+    private StrimziContainer strimziContainer;
+    private ZookeeperContainer zookeeperContainer;
+    
+    @Override
+    public String bootstrapServers() {
+        return strimziContainer.getHost() + ":" + strimziContainer.getKafkaPort();
+    }
+    
+    @Override
+    public String bootstrapSSLServers() {
+        return bootstrapServers(); //always plain for local kafka
+    }
+    
+    @Override
+    public StrimziContainer container() {
+        return strimziContainer;
+    }
+    
+    @Override
+    public void deploy() {
+        Network network = Network.newNetwork();
+        
+        LOG.info("Starting Zookeeper container");
+        zookeeperContainer = new ZookeeperContainer(image(), network);
+        zookeeperContainer.start();
+        LOG.info("Zookeeper container started");
+        
+        LOG.info("Starting Kafka container");
+        strimziContainer = new StrimziContainer(image(), network);
+        strimziContainer.start();
+        LOG.info("Kafka container started");
+    }
+    
+    @Override
+    public void undeploy() {
+        if (strimziContainer != null) {
+            LOG.info("Stopping Kafka container");
+            strimziContainer.stop();
+        }
+        
+        if (zookeeperContainer != null) {
+            LOG.info("Stopping Zookeeper container");
+            zookeeperContainer.stop();
+        }
+    }
+    
+    @Override
+    public void openResources() {
+        props.setProperty("bootstrap.servers", bootstrapServers());
+        super.openResources();
+    }
+    
+    public String defaultImage() {
+        return "registry.redhat.io/amq-streams/kafka-36-rhel9:2.7.0-17";
+    }
+}
+```
+
+<Note>
+Local implementations are simpler and faster to start, making them ideal for development and CI/CD pipelines.
+</Note>
+
+### Key interfaces
+
+<Tabs>
+  <Tab title="ContainerDeployable">
+    The `ContainerDeployable` interface manages Docker container lifecycle.
+    
+    **Methods:**
+    
+    | Method | Description |
+    |--------|-------------|
+    | `container()` | Returns the TestContainer instance |
+    | `deploy()` | Starts the container |
+    | `undeploy()` | Stops the container |
+    | `getLogs()` | Returns container logs |
+  </Tab>
+  
+  <Tab title="WithDockerImage">
+    The `WithDockerImage` interface provides Docker image configuration.
+    
+    **Methods:**
+    
+    | Method | Description |
+    |--------|-------------|
+    | `defaultImage()` | Returns the default Docker image |
+    | `image()` | Returns the image to use (default or override) |
+    
+    **Overriding images:**
+    
+    ```bash
+    # Override Kafka image
+    tnb.kafka.image=quay.io/strimzi/kafka:0.38.0-kafka-3.6.0
+    ```
+  </Tab>
+  
+  <Tab title="Deployable">
+    The base `Deployable` interface defines the deployment contract.
+    
+    **Methods:**
+    
+    | Method | Description |
+    |--------|-------------|
+    | `deploy()` | Deploy the service |
+    | `undeploy()` | Undeploy the service |
+    | `openResources()` | Initialize clients after deployment |
+    | `closeResources()` | Close clients before undeployment |
+    | `enabled()` | Whether this implementation is enabled |
+    | `priority()` | Implementation priority (higher = preferred) |
+  </Tab>
+</Tabs>
+
+## OpenShift deployment
+
+OpenShift deployment creates resources in an OpenShift/Kubernetes cluster.
+
+### Configuration
+
+```bash
+test.use.openshift=true
+```
+
+### How it works
+
+Services implement the `OpenshiftDeployable` interface:
+
+```java
+public interface OpenshiftDeployable extends Deployable {
+    void create();
+    
+    boolean isReady();
+    
+    boolean isDeployed();
+    
+    default long waitTime() {
+        return 300_000; // 5 minutes
+    }
+    
+    Predicate<Pod> podSelector();
+    
+    default void deploy() {
+        if (!isDeployed()) {
+            create();
+        }
+        
+        WaitUtils.waitFor(new Waiter(this::isReady, "Waiting until the service is ready")
+            .timeout(retries, waitTime() / retries));
+    }
+    
+    @Override
+    default boolean enabled() {
+        return OpenshiftConfiguration.isOpenshift();
+    }
+    
+    @Override
+    default int priority() {
+        return 1; // Higher than local (0)
+    }
+}
+```
+
+### Example: OpenshiftKafka
+
+From `OpenshiftKafka.java:49-105`:
+
+```java
+@AutoService(Kafka.class)
+public class OpenshiftKafka extends Kafka implements ReusableOpenshiftDeployable, WithName, WithOperatorHub {
+    private static final Logger LOG = LoggerFactory.getLogger(OpenshiftKafka.class);
+    public static final String NODE_POOL_NAME = "multirole";
+    
+    @Override
+    public void deploy() {
+        kafkaCrdClient = OpenshiftClient.get().resources(io.strimzi.api.kafka.model.Kafka.class, KafkaList.class);
+        nodePoolCrdClient = OpenshiftClient.get().resources(KafkaNodePool.class, KafkaNodePoolList.class);
+        ReusableOpenshiftDeployable.super.deploy();
+    }
+    
+    @Override
+    public void create() {
+        if (!usePreparedGlobalInstallation()) {
+            createSubscription(); // Install the AMQ Streams operator
+            deployKafkaCR();      // Create Kafka custom resource
+        }
+    }
+    
+    @Override
+    public boolean isReady() {
+        try {
+            return kafkaCrdClient
+                .inNamespace(targetNamespace())
+                .withName(name())
+                .get()
+                .getStatus().getConditions()
+                .stream()
+                .filter(c -> "Ready".equals(c.getType()))
+                .map(Condition::getStatus)
+                .map(Boolean::parseBoolean)
+                .findFirst().orElse(false);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+    
+    @Override
+    public boolean isDeployed() {
+        return OpenshiftClient.get().inNamespace(targetNamespace(), c -> 
+            !c.getLabeledPods("name", "amq-streams-cluster-operator").isEmpty()
+            && kafkaCrdClient.inNamespace(targetNamespace()).withName(name()).get() != null);
+    }
+    
+    @Override
+    public String name() {
+        return "my-kafka-cluster";
+    }
+}
+```
+
+### Deploying Kafka on OpenShift
+
+The `deployKafkaCR()` method creates Kafka resources using the Strimzi operator:
+
+```java
+private void deployKafkaCR() {
+    KafkaNodePool nodePool = new KafkaNodePoolBuilder()
+        .withNewMetadata()
+            .withName(NODE_POOL_NAME)
+            .withLabels(Map.of("strimzi.io/cluster", name()))
+        .endMetadata()
+        .withNewSpec()
+            .addAllToRoles(Stream.of("controller", "broker").map(ProcessRoles::forValue).toList())
+            .withNewEphemeralStorage().endEphemeralStorage()
+            .withReplicas(1)
+        .endSpec()
+        .build();
+    
+    nodePoolCrdClient.inNamespace(targetNamespace()).resource(nodePool).create();
+    
+    io.strimzi.api.kafka.model.Kafka kafka = new KafkaBuilder()
+        .withNewMetadata()
+            .withName(name())
+            .withAnnotations(Map.of("strimzi.io/kraft", "enabled", "strimzi.io/node-pools", "enabled"))
+        .endMetadata()
+        .withNewSpec()
+            .withNewKafka()
+                .withReplicas(1)
+                .addNewListener()
+                    .withName("plain")
+                    .withPort(9092)
+                    .withTls(false)
+                    .withType(KafkaListenerType.INTERNAL)
+                .endListener()
+                .addNewListener()
+                    .withName("route")
+                    .withPort(9093)
+                    .withTls(true)
+                    .withType(KafkaListenerType.ROUTE)
+                .endListener()
+                .addToConfig("offsets.topic.replication.factor", 1)
+                .addToConfig("transaction.state.log.replication.factor", 1)
+            .endKafka()
+            .withNewEntityOperator()
+                .withNewTopicOperator().endTopicOperator()
+                .withNewUserOperator().endUserOperator()
+            .endEntityOperator()
+        .endSpec()
+        .build();
+    
+    kafkaCrdClient.inNamespace(targetNamespace()).resource(kafka).create();
+}
+```
+
+<Info>
+OpenShift deployments use operators (like AMQ Streams for Kafka) to manage service lifecycle.
+</Info>
+
+### Key interfaces
+
+<Accordion>
+  <AccordionItem title="OpenshiftDeployable">
+    The `OpenshiftDeployable` interface manages OpenShift resource lifecycle.
+    
+    **Required methods:**
+    
+    - `create()`: Create OpenShift resources
+    - `isReady()`: Check if the service is ready
+    - `isDeployed()`: Check if the service is already deployed
+    - `podSelector()`: Predicate to identify service pods
+    
+    **Optional methods:**
+    
+    - `waitTime()`: Maximum wait time for deployment (default: 5 minutes)
+    - `priority()`: Implementation priority (default: 1)
+  </AccordionItem>
+  
+  <AccordionItem title="WithName">
+    Provides the resource name in OpenShift.
+    
+    **Method:**
+    
+    - `name()`: Returns the name of the primary resource
+  </AccordionItem>
+  
+  <AccordionItem title="WithOperatorHub">
+    For services deployed via OperatorHub.
+    
+    **Methods:**
+    
+    - `operatorName()`: Returns the operator name
+    - `createSubscription()`: Creates the operator subscription
+    - `deleteSubscription()`: Removes the operator subscription
+  </AccordionItem>
+  
+  <AccordionItem title="ReusableOpenshiftDeployable">
+    Allows reusing existing deployments across test classes.
+    
+    This is useful in shared OpenShift environments where you don't want to redeploy services for each test class.
+  </AccordionItem>
+</Accordion>
+
+## Switching between modes
+
+You don't need to change your test code when switching deployment modes:
+
+<CodeGroup>
+```java Test code (works in both modes)
+public class KafkaTest {
+    @RegisterExtension
+    public static Kafka kafka = ServiceFactory.create(Kafka.class);
+    
+    @Test
+    public void testWithKafka() {
+        kafka.validation().produce("topic", "message");
+        List<ConsumerRecord<String, String>> records = kafka.validation().consume("topic");
+        Assertions.assertEquals(1, records.size());
+    }
+}
+```
+
+```bash Local execution
+# Run with TestContainers (default)
+mvn test
+
+# Or explicitly
+mvn test -Dtest.use.openshift=false
+```
+
+```bash OpenShift execution
+# Run on OpenShift
+mvn test -Dtest.use.openshift=true
+```
+</CodeGroup>
+
+## Deployment lifecycle
+
+Both deployment modes follow the same lifecycle:
+
+<Steps>
+  <Step title="Service creation">
+    `ServiceFactory.create()` selects the appropriate implementation based on configuration.
+  </Step>
+  
+  <Step title="beforeAll()">
+    JUnit 5 calls `beforeAll()` which:
+    
+    1. Calls `deploy()` to start/create the service
+    2. Calls `openResources()` to initialize clients
+  </Step>
+  
+  <Step title="Test execution">
+    Tests interact with the service through `validation()` methods.
+  </Step>
+  
+  <Step title="afterAll()">
+    JUnit 5 calls `afterAll()` which:
+    
+    1. Calls `closeResources()` to close clients
+    2. Calls `undeploy()` to stop/delete the service
+  </Step>
+</Steps>
+
+## External service deployment
+
+You can also connect to externally deployed services (available for a subset of services):
+
+```bash
+# Connect to external Kafka
+tnb.kafka.host=my-kafka-server.example.com
+tnb.kafka.port=9092
+```
+
+When an external host is configured:
+
+1. TNB skips deployment
+2. Clients connect to the provided host and port
+3. The service assumes the external deployment is already ready
+
+<Note>
+External deployment support varies by service. Check the service implementation to see if it's supported.
+</Note>
+
+## Overriding Docker images
+
+For local deployments, you can override the default Docker image:
+
+```bash
+# Override Kafka image
+tnb.kafka.image=quay.io/strimzi/kafka:0.38.0-kafka-3.6.0
+
+# Override PostgreSQL image
+tnb.postgresql.image=postgres:15-alpine
+```
+
+The system property format is:
+
+```
+tnb.<serviceName>.image=<image:tag>
+```
+
+Where `<serviceName>` is the service class name in lowercase (e.g., `kafka`, `postgresql`, `mongodb`).
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Use local for development" icon="laptop-code">
+    Local mode is faster and doesn't require cluster access, making it ideal for development.
+  </Card>
+  
+  <Card title="Use OpenShift for integration testing" icon="cloud">
+    OpenShift mode provides a production-like environment for integration and E2E tests.
+  </Card>
+  
+  <Card title="Keep tests deployment-agnostic" icon="shield-check">
+    Don't write code that depends on a specific deployment mode - use the service abstraction.
+  </Card>
+  
+  <Card title="Configure via properties" icon="gear">
+    Use system properties to configure deployment mode, not hardcoded values in tests.
+  </Card>
+</CardGroup>
+
+## Comparison table
+
+| Feature | Local (TestContainers) | OpenShift |
+|---------|------------------------|------------|
+| **Startup time** | Fast (seconds) | Slower (minutes) |
+| **Resource usage** | Local Docker | Cluster resources |
+| **Isolation** | Process-level | Namespace-level |
+| **Production parity** | Lower | Higher |
+| **CI/CD friendly** | High | Requires cluster access |
+| **Configuration** | `test.use.openshift=false` | `test.use.openshift=true` |
+| **Default mode** | Yes | No |
+| **Priority** | 0 | 1 |
+
+## Next steps
+
+<CardGroup cols={3}>
+  <Card title="Services" icon="cube" href="/core-concepts/services">
+    Learn about the Service abstraction
+  </Card>
+  
+  <Card title="Accounts" icon="key" href="/core-concepts/accounts">
+    Understand account management
+  </Card>
+  
+  <Card title="Validation" icon="check" href="/core-concepts/validation">
+    Use validation classes in tests
+  </Card>
+</CardGroup>

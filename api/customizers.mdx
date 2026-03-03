@@ -1,0 +1,463 @@
+---
+title: Customizers
+description: Interfaces and classes for customizing integration behavior
+---
+
+## Overview
+
+Customizers provide a mechanism to modify integration builders, add dependencies, configure properties, and manipulate route builder code. They enable product-specific and component-specific customizations while maintaining clean, reusable test code.
+
+## Customizer base class
+
+**Package:** `software.tnb.product.customizer`
+
+Abstract base class for all customizers.
+
+### Constructor
+
+```java
+public Customizer()
+public Customizer(ProductType product)
+```
+
+<ParamField path="product" type="ProductType">
+  Optional product type. When specified, the customizer only runs for that product. If null, runs for all products.
+</ParamField>
+
+### Methods
+
+#### customize()
+
+Abstract method to be implemented by concrete customizers.
+
+```java
+public abstract void customize()
+```
+
+This method contains the customization logic and has access to the integration builder via `getIntegrationBuilder()`.
+
+#### getIntegrationBuilder()
+
+Returns the integration builder being customized.
+
+```java
+public AbstractIntegrationBuilder<?> getIntegrationBuilder()
+```
+
+#### getRouteBuilderClass()
+
+Gets a specific route builder class by name.
+
+```java
+public ClassOrInterfaceDeclaration getRouteBuilderClass(String name)
+```
+
+<ParamField path="name" type="String" required>
+  Name of the route builder class to retrieve
+</ParamField>
+
+**Returns:** JavaParser `ClassOrInterfaceDeclaration` for AST manipulation
+
+#### getConfigureMethod()
+
+Gets the `configure()` method from a route builder class.
+
+```java
+public MethodDeclaration getConfigureMethod(String className)
+```
+
+<ParamField path="className" type="String" required>
+  Name of the route builder class
+</ParamField>
+
+**Returns:** JavaParser `MethodDeclaration` for the `configure()` method
+
+---
+
+## Customizers enum
+
+**Package:** `software.tnb.product.customizer`
+
+Provides product-specific customizers through an enum-based factory pattern.
+
+### Enum values
+
+#### SPRINGBOOT
+
+Creates customizers that run only for Spring Boot products.
+
+```java
+Customizers.SPRINGBOOT.customize(Consumer<AbstractIntegrationBuilder<?>> i)
+```
+
+#### QUARKUS
+
+Creates customizers that run only for Quarkus products.
+
+```java
+Customizers.QUARKUS.customize(Consumer<AbstractIntegrationBuilder<?>> i)
+```
+
+### Method
+
+#### customize()
+
+```java
+public Customizer customize(Consumer<AbstractIntegrationBuilder<?>> i)
+```
+
+<ParamField path="i" type="Consumer<AbstractIntegrationBuilder<?>>" required>
+  Lambda or method reference that receives the integration builder and performs customization
+</ParamField>
+
+**Returns:** A `Customizer` instance that will only execute for the specified product type
+
+### Examples
+
+<CodeGroup>
+
+```java Spring Boot specific
+new IntegrationBuilder("my-app")
+    .fromRouteBuilder(new MyRouteBuilder())
+    .addCustomizer(Customizers.SPRINGBOOT.customize(builder -> {
+        builder.dependencies("spring-boot-starter-actuator");
+        builder.addToApplicationProperties("management.endpoints.web.exposure.include", "*");
+    }))
+```
+
+```java Quarkus specific
+new IntegrationBuilder("my-app")
+    .fromRouteBuilder(new MyRouteBuilder())
+    .addCustomizer(Customizers.QUARKUS.customize(builder -> {
+        builder.dependencies("smallrye-health");
+        builder.addToApplicationProperties("quarkus.http.port", "8080");
+    }))
+```
+
+```java Multiple product-specific customizers
+new IntegrationBuilder("my-app")
+    .fromRouteBuilder(new MyRouteBuilder())
+    .addCustomizer(
+        Customizers.SPRINGBOOT.customize(builder -> {
+            builder.dependencies("spring-boot-starter-web");
+        }),
+        Customizers.QUARKUS.customize(builder -> {
+            builder.dependencies("resteasy");
+        })
+    )
+```
+
+</CodeGroup>
+
+---
+
+## Product-specific customizer base classes
+
+### SpringBootCustomizer
+
+**Package:** `software.tnb.product.csb.customizer`
+
+Base class for Spring Boot-specific customizers.
+
+```java
+public abstract class SpringBootCustomizer extends Customizer {
+    public SpringBootCustomizer() {
+        super(ProductType.CAMEL_SPRINGBOOT);
+    }
+}
+```
+
+**Example implementation:**
+
+```java
+public class MySpringBootCustomizer extends SpringBootCustomizer {
+    @Override
+    public void customize() {
+        getIntegrationBuilder().dependencies("spring-boot-starter-data-jpa");
+        getIntegrationBuilder().addToApplicationProperties(
+            "spring.datasource.url", "jdbc:postgresql://localhost:5432/testdb"
+        );
+    }
+}
+```
+
+### QuarkusCustomizer
+
+**Package:** `software.tnb.product.cq.customizer`
+
+Base class for Quarkus-specific customizers.
+
+```java
+public abstract class QuarkusCustomizer extends Customizer {
+    public QuarkusCustomizer() {
+        super(ProductType.CAMEL_QUARKUS);
+    }
+}
+```
+
+**Example implementation:**
+
+```java
+public class MyQuarkusCustomizer extends QuarkusCustomizer {
+    @Override
+    public void customize() {
+        getIntegrationBuilder().dependencies("jdbc-postgresql");
+        getIntegrationBuilder().addToApplicationProperties(
+            "quarkus.datasource.jdbc.url", "jdbc:postgresql://localhost:5432/testdb"
+        );
+    }
+}
+```
+
+---
+
+## Built-in customizers
+
+TNB provides several built-in customizers for common scenarios.
+
+### RestCustomizer
+
+**Package:** `software.tnb.product.customizer.component.rest`
+
+Configures REST component support for both Spring Boot and Quarkus.
+
+#### Constructors
+
+```java
+public RestCustomizer()
+public RestCustomizer(String path)
+```
+
+<ParamField path="path" type="String" default="/camel">
+  Base path for REST endpoints
+</ParamField>
+
+#### Methods
+
+```java
+public String getReadinessCheckPath()
+```
+
+**Returns:** The path to use for readiness checks
+
+#### Example
+
+```java
+new IntegrationBuilder("rest-api")
+    .fromRouteBuilder(new RouteBuilder() {
+        @Override
+        public void configure() {
+            rest("/api")
+                .get("/hello")
+                .to("direct:hello");
+            
+            from("direct:hello")
+                .setBody(constant("Hello World"));
+        }
+    })
+    .addCustomizer(new RestCustomizer("/api"))
+```
+
+**What it does:**
+
+- **Spring Boot**: Adds `spring-boot-starter-undertow` dependency and configures servlet
+- **Quarkus**: Configures `quarkus.camel.servlet.url-patterns` and enables OpenShift route exposure
+
+### ProductsCustomizer
+
+**Package:** `software.tnb.product.customizer`
+
+Abstract base class for customizers that need different behavior per product.
+
+```java
+public abstract class ProductsCustomizer extends Customizer {
+    protected abstract void customizeQuarkus();
+    protected abstract void customizeSpringboot();
+    
+    @Override
+    public final void customize() {
+        switch (TestConfiguration.product()) {
+            case CAMEL_QUARKUS:
+                customizeQuarkus();
+                break;
+            case CAMEL_SPRINGBOOT:
+                customizeSpringboot();
+                break;
+        }
+    }
+}
+```
+
+**Example implementation:**
+
+```java
+public class DatabaseCustomizer extends ProductsCustomizer {
+    private final String jdbcUrl;
+    
+    public DatabaseCustomizer(String jdbcUrl) {
+        this.jdbcUrl = jdbcUrl;
+    }
+    
+    @Override
+    protected void customizeQuarkus() {
+        getIntegrationBuilder().dependencies("jdbc-postgresql", "agroal");
+        getIntegrationBuilder().addToApplicationProperties(
+            "quarkus.datasource.jdbc.url", jdbcUrl
+        );
+    }
+    
+    @Override
+    protected void customizeSpringboot() {
+        getIntegrationBuilder().dependencies(
+            "spring-boot-starter-jdbc",
+            "org.postgresql:postgresql:42.6.0"
+        );
+        getIntegrationBuilder().addToApplicationProperties(
+            "spring.datasource.url", jdbcUrl
+        );
+    }
+}
+```
+
+### Other built-in customizers
+
+- **MongoDBCustomizer** - Configures MongoDB connection
+- **DataSourceCustomizer** - Configures JDBC datasources
+- **CxfSoapCustomizer** - Configures Apache CXF SOAP services
+- **CxfRestCustomizer** - Configures Apache CXF REST services
+- **PahoCustomizer** - Configures Eclipse Paho MQTT client
+- **MllpCustomizer** - Configures MLLP (healthcare) protocol
+- **SagaLRACustomizer** - Configures Saga LRA pattern support
+- **BytemanCustomizer** - Configures Byteman for bytecode manipulation
+
+---
+
+## Advanced customization
+
+### Manipulating route builder AST
+
+Customizers can modify route builder code using JavaParser AST manipulation:
+
+```java
+public class AddLoggingCustomizer extends Customizer {
+    @Override
+    public void customize() {
+        ClassOrInterfaceDeclaration routeClass = getRouteBuilderClass("MyRouteBuilder");
+        MethodDeclaration configureMethod = getConfigureMethod("MyRouteBuilder");
+        
+        // Add logging to the configure method
+        configureMethod.getBody().ifPresent(body -> {
+            body.addStatement(0, "LOG.info(\"Starting route configuration\");");
+        });
+        
+        // Add logger field
+        routeClass.addFieldWithInitializer(
+            "org.slf4j.Logger",
+            "LOG",
+            "LoggerFactory.getLogger(MyRouteBuilder.class)",
+            Modifier.Keyword.PRIVATE, Modifier.Keyword.STATIC, Modifier.Keyword.FINAL
+        );
+    }
+}
+```
+
+### Conditional customization
+
+```java
+public class ConditionalCustomizer extends Customizer {
+    private final boolean enableMetrics;
+    
+    public ConditionalCustomizer(boolean enableMetrics) {
+        this.enableMetrics = enableMetrics;
+    }
+    
+    @Override
+    public void customize() {
+        if (enableMetrics) {
+            getIntegrationBuilder().dependencies("micrometer-prometheus");
+            
+            if (TestConfiguration.product() == ProductType.CAMEL_SPRINGBOOT) {
+                getIntegrationBuilder().addToApplicationProperties(
+                    "management.metrics.export.prometheus.enabled", "true"
+                );
+            } else {
+                getIntegrationBuilder().addToApplicationProperties(
+                    "quarkus.micrometer.enabled", "true"
+                );
+            }
+        }
+    }
+}
+```
+
+### Chaining customizers
+
+```java
+// Create a composite customizer
+public class FullStackCustomizer extends Customizer {
+    @Override
+    public void customize() {
+        // Apply multiple customizations
+        new RestCustomizer().doCustomize();
+        new DatabaseCustomizer("jdbc:postgresql://localhost:5432/db").doCustomize();
+        new MongoDBCustomizer().doCustomize();
+        
+        // Add additional configuration
+        getIntegrationBuilder().dependencies("jackson");
+    }
+}
+```
+
+---
+
+## Customizable interface
+
+**Package:** `software.tnb.product.customizer`
+
+Interface for objects that can create customizers.
+
+```java
+public interface Customizable {
+    Customizer customize(Consumer<AbstractIntegrationBuilder<?>> i);
+}
+```
+
+Implemented by the `Customizers` enum to provide the fluent customization API.
+
+---
+
+## Best practices
+
+1. **Use product-specific base classes** when behavior differs between products:
+   ```java
+   public class MyCustomizer extends SpringBootCustomizer { }
+   ```
+
+2. **Use ProductsCustomizer** when you need different implementations per product:
+   ```java
+   public class MyCustomizer extends ProductsCustomizer {
+       protected void customizeQuarkus() { }
+       protected void customizeSpringboot() { }
+   }
+   ```
+
+3. **Use Customizers enum** for inline, product-specific customizations:
+   ```java
+   .addCustomizer(Customizers.SPRINGBOOT.customize(builder -> { }))
+   ```
+
+4. **Reuse existing customizers** instead of adding dependencies manually:
+   ```java
+   .addCustomizer(new RestCustomizer())  // Better than manual REST setup
+   ```
+
+5. **Keep customizers focused** - each customizer should handle one concern
+
+6. **Test customizers** with both Spring Boot and Quarkus when using generic `Customizer` base class
+
+---
+
+## Related
+
+- [IntegrationBuilder](/api/integration-builder) - Use customizers with integration builders
+- [ProductFactory](/api/product-factory) - Create products that use customizers

@@ -1,0 +1,497 @@
+---
+title: Deployment strategies
+description: Deploy Camel integrations to OpenShift using various strategies
+---
+
+TNB supports multiple deployment strategies for OpenShift, each optimized for different use cases and workflows.
+
+## Overview
+
+Deployment strategies are defined in the `OpenshiftDeployStrategyType` enum:
+
+```java
+public enum OpenshiftDeployStrategyType {
+    JKUBE,
+    DEVFILE,
+    BINARY,
+    CUSTOM,
+    JKUBE_EXT_REPO
+}
+```
+
+## Selecting a strategy
+
+Set the deployment strategy using the `openshift.deploy.strategy` system property:
+
+```bash
+-Dopenshift.deploy.strategy=JKUBE
+```
+
+<Info>
+  If not specified, TNB selects a default strategy based on the product type.
+</Info>
+
+## Strategy types
+
+### JKube strategy
+
+The Eclipse JKube Maven plugin strategy is the standard approach for OpenShift deployments.
+
+<ParamField path="Type" type="OpenshiftDeployStrategyType">
+  `JKUBE`
+</ParamField>
+
+<ParamField path="Supported products" type="ProductType[]">
+  `CAMEL_SPRINGBOOT`
+</ParamField>
+
+#### How it works
+
+<Steps>
+  <Step title="Build the project">
+    Runs Maven with `clean install` goals.
+  </Step>
+  
+  <Step title="Deploy to OpenShift">
+    Executes JKube's `openshift` goal to create OpenShift resources and deploy.
+  </Step>
+  
+  <Step title="Create TNB deployment">
+    Optionally creates TNB-specific deployment resources.
+  </Step>
+</Steps>
+
+#### Usage
+
+```java
+import software.tnb.product.integration.builder.IntegrationBuilder;
+
+IntegrationBuilder ib = new IntegrationBuilder("jkube-deployment")
+    .fromRouteBuilder(routeBuilder)
+    .dependencies("timer", "log");
+
+product.createIntegration(ib);
+```
+
+#### Configuration
+
+```bash
+# System properties
+-Dopenshift.deploy.strategy=JKUBE
+-Dopenshift.url=https://api.openshift.example.com:6443
+-Dopenshift.namespace=my-project
+```
+
+### JKube with external repository
+
+Similar to JKube but pushes the container image to an external registry.
+
+<ParamField path="Type" type="OpenshiftDeployStrategyType">
+  `JKUBE_EXT_REPO`
+</ParamField>
+
+<ParamField path="Supported products" type="ProductType[]">
+  All products
+</ParamField>
+
+#### Use case
+
+When your OpenShift cluster requires images from a specific external registry (e.g., Quay.io, Docker Hub).
+
+#### Configuration
+
+```bash
+-Dopenshift.deploy.strategy=JKUBE_EXT_REPO
+-Dexternal.registry.url=quay.io/myorg
+-Dexternal.registry.username=myuser
+-Dexternal.registry.password=mypassword
+```
+
+### Binary strategy
+
+Uses OpenShift's Binary Source-to-Image (S2I) builds.
+
+<ParamField path="Type" type="OpenshiftDeployStrategyType">
+  `BINARY`
+</ParamField>
+
+<ParamField path="Supported products" type="ProductType[]">
+  `CAMEL_SPRINGBOOT`
+</ParamField>
+
+#### How it works
+
+<Steps>
+  <Step title="Copy resources">
+    Copies resources to `ocp/deployments/data` directory.
+  </Step>
+  
+  <Step title="Build JAR">
+    Runs Maven `clean package` with `openshift` profile.
+  </Step>
+  
+  <Step title="Copy JAR">
+    Copies the generated JAR to `ocp/deployments`.
+  </Step>
+  
+  <Step title="Create build config">
+    Creates a new build using `oc new-build --binary`.
+  </Step>
+  
+  <Step title="Start build">
+    Starts the build with `oc start-build --from-dir`.
+  </Step>
+  
+  <Step title="Create deployment">
+    Creates the deployment with `oc new-app`.
+  </Step>
+  
+  <Step title="Expose route">
+    Exposes the service with `oc expose svc`.
+  </Step>
+</Steps>
+
+#### Key implementation details
+
+```java
+@AutoService(OpenshiftDeployStrategy.class)
+public class BinaryStrategy extends OpenshiftBaseDeployer {
+    @Override
+    public void doDeploy() {
+        // Create new build
+        binary.execute("new-build", "--binary=true",
+            String.format("--name=%s", name),
+            String.format("--image=%s", SpringBootConfiguration.openshiftBaseImage()),
+            String.format("--labels=%s=%s", OpenshiftConfiguration.openshiftDeploymentLabel(), name)
+        );
+        
+        // Start build
+        binary.execute("start-build", name,
+            String.format("--from-dir=%s", baseDirectory.resolve("ocp").toAbsolutePath()),
+            "--follow"
+        );
+        
+        // Create deployment
+        binary.execute("new-app", name,
+            String.format("--labels=%s=%s", OpenshiftConfiguration.openshiftDeploymentLabel(), name),
+            String.format("--env=JAVA_OPTS_APPEND=%s", getPropertiesForJVM(integrationBuilder)),
+            "--allow-missing-imagestream-tags=true"
+        );
+        
+        // Expose service
+        binary.execute("expose", String.format("svc/%s", name),
+            String.format("--labels=%s=%s", OpenshiftConfiguration.openshiftDeploymentLabel(), name)
+        );
+    }
+}
+```
+
+#### Usage
+
+```bash
+-Dopenshift.deploy.strategy=BINARY
+```
+
+### Devfile strategy
+
+Uses OpenShift Dev Spaces / ODO with devfile-based deployments.
+
+<ParamField path="Type" type="OpenshiftDeployStrategyType">
+  `DEVFILE`
+</ParamField>
+
+<ParamField path="Supported products" type="ProductType[]">
+  `CAMEL_SPRINGBOOT`
+</ParamField>
+
+#### How it works
+
+<Steps>
+  <Step title="Copy resources">
+    Copies project resources to `devfile-resources` directory.
+  </Step>
+  
+  <Step title="Copy devfile">
+    Copies the devfile.yaml for Java Spring Boot UBI8.
+  </Step>
+  
+  <Step title="Copy Dockerfile">
+    Copies the Dockerfile for the build.
+  </Step>
+  
+  <Step title="Configure ODO">
+    Sets ODO preferences and environment variables.
+  </Step>
+  
+  <Step title="Deploy with ODO">
+    Executes `odo deploy` with configured variables.
+  </Step>
+</Steps>
+
+#### Environment variables
+
+The strategy configures several environment variables:
+
+- `MAVEN_MIRROR_URL`: Maven repository mirror
+- `JAVA_OPTS_APPEND`: JVM options from integration builder
+- `MAVEN_ARGS_APPEND`: Maven arguments
+- `SUB_FOLDER`: Subfolder for multi-module projects
+- `APP`: Application name
+- `IMAGE_REGISTRY`: Container registry URL
+
+#### Usage
+
+```bash
+# Install ODO CLI
+-Dodo.path=/usr/local/bin/odo
+
+# Set strategy
+-Dopenshift.deploy.strategy=DEVFILE
+```
+
+#### Key implementation details
+
+```java
+@Override
+public void doDeploy() {
+    try {
+        login();
+        List<String> envVars = new ArrayList<>();
+        
+        // Set ephemeral preference
+        runOdoCmd(Arrays.asList("preference", "set", "Ephemeral", "true", "--force"), Phase.GENERATE);
+        
+        // Configure Maven mirror
+        if (TestConfiguration.isMavenMirror()) {
+            envVars.addAll(
+                setEnvVar("MAVEN_MIRROR_URL", 
+                    StringUtils.substringBefore(TestConfiguration.mavenRepository(), "@mirrorOf"))
+            );
+        }
+        
+        // Add JVM properties
+        envVars.addAll(setEnvVar("JAVA_OPTS_APPEND", getPropertiesForJVM(integrationBuilder)));
+        
+        // Deploy
+        ArrayList<String> devCommand = new ArrayList<>(List.of("deploy"));
+        devCommand.addAll(envVars);
+        runOdoCmd(devCommand, Phase.DEPLOY);
+    } catch (IOException | InterruptedException e) {
+        throw new RuntimeException(e);
+    }
+}
+```
+
+### Custom strategy
+
+Implement your own deployment strategy for special requirements.
+
+<ParamField path="Type" type="OpenshiftDeployStrategyType">
+  `CUSTOM`
+</ParamField>
+
+<ParamField path="Supported products" type="ProductType[]">
+  All products (depends on implementation)
+</ParamField>
+
+#### Creating a custom strategy
+
+<Steps>
+  <Step title="Implement OpenshiftCustomDeployer">
+    Create a class implementing the `OpenshiftCustomDeployer` interface.
+  </Step>
+  
+  <Step title="Define deployment logic">
+    Implement `preDeploy()`, `doDeploy()`, and `undeploy()` methods.
+  </Step>
+  
+  <Step title="Register with integration builder">
+    Use `useOcpCustomStrategy()` to register your deployer.
+  </Step>
+</Steps>
+
+#### Example
+
+```java
+import software.tnb.product.deploystrategy.impl.custom.OpenshiftCustomDeployer;
+import software.tnb.product.integration.builder.IntegrationBuilder;
+
+public class MyCustomDeployer implements OpenshiftCustomDeployer {
+    @Override
+    public void preDeploy() {
+        // Pre-deployment setup
+        LOG.info("Preparing custom deployment");
+    }
+    
+    @Override
+    public void doDeploy() {
+        // Main deployment logic
+        LOG.info("Executing custom deployment");
+        // ... your deployment code ...
+    }
+    
+    @Override
+    public void undeploy() {
+        // Cleanup
+        LOG.info("Cleaning up custom deployment");
+    }
+}
+
+// Usage
+IntegrationBuilder ib = new IntegrationBuilder("custom-deploy")
+    .fromRouteBuilder(routeBuilder)
+    .useOcpCustomStrategy(new MyCustomDeployer());
+```
+
+## Deployment phases
+
+All deployment strategies follow a common lifecycle:
+
+<Steps>
+  <Step title="Pre-deploy">
+    `preDeploy()`: Preparation tasks like copying resources, building JARs.
+  </Step>
+  
+  <Step title="Deploy">
+    `doDeploy()`: Main deployment to OpenShift cluster.
+  </Step>
+  
+  <Step title="Wait for ready">
+    Application waits until pods are running and ready.
+  </Step>
+  
+  <Step title="Test execution">
+    Your tests run against the deployed integration.
+  </Step>
+  
+  <Step title="Undeploy">
+    `undeploy()`: Cleanup of OpenShift resources.
+  </Step>
+</Steps>
+
+## Strategy selection logic
+
+The `OpenshiftDeployStrategyFactory` selects strategies based on:
+
+1. Explicit `openshift.deploy.strategy` system property
+2. Product type compatibility
+3. Custom strategy from integration builder
+4. Default strategy for the product
+
+```java
+public class OpenshiftDeployStrategyFactory {
+    public static OpenshiftDeployStrategy getStrategy(
+        ProductType productType,
+        OpenshiftDeployStrategyType strategyType
+    ) {
+        // Find strategy matching product and type
+        return strategies.stream()
+            .filter(s -> Arrays.asList(s.products()).contains(productType))
+            .filter(s -> s.deployType() == strategyType)
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException(
+                "No strategy found for product " + productType + 
+                " and strategy " + strategyType
+            ));
+    }
+}
+```
+
+## Logging and troubleshooting
+
+Each strategy creates log files in the application location:
+
+- `{integration-name}-build.log`: Build phase logs
+- `{integration-name}-deploy.log`: Deployment phase logs
+- `{integration-name}-undeploy.log`: Undeployment phase logs
+
+```java
+final BuildRequest.Builder requestBuilder = new BuildRequest.Builder()
+    .withBaseDirectory(baseDirectory)
+    .withArgs("clean", "package")
+    .withProfiles("openshift")
+    .withLogFile(TestConfiguration.appLocation().resolve(name + "-build.log"))
+    .withLogMarker(LogStream.marker(name, Phase.BUILD));
+```
+
+## Best practices
+
+<CardGroup cols={1}>
+  <Card title="Use JKube for standard deployments">
+    JKube is the most common and well-supported strategy for most use cases.
+  </Card>
+  
+  <Card title="Use Binary for quick iterations">
+    Binary strategy is faster for development cycles as it skips some build steps.
+  </Card>
+  
+  <Card title="Use Devfile for Dev Spaces">
+    Devfile strategy integrates with OpenShift Dev Spaces for cloud-native development.
+  </Card>
+  
+  <Card title="Implement Custom for special requirements">
+    Only implement custom strategies when built-in strategies don't meet your needs.
+  </Card>
+  
+  <Card title="Check logs for failures">
+    Always check the generated log files when deployments fail.
+  </Card>
+  
+  <Card title="Clean up resources">
+    Ensure proper cleanup in `undeploy()` to avoid resource leaks.
+  </Card>
+</CardGroup>
+
+## Configuration reference
+
+### Common system properties
+
+<ParamField path="openshift.url" type="string" required>
+  OpenShift cluster API URL
+  
+  **Example**: `https://api.openshift.example.com:6443`
+</ParamField>
+
+<ParamField path="openshift.deploy.strategy" type="OpenshiftDeployStrategyType">
+  Deployment strategy to use
+  
+  **Values**: `JKUBE`, `BINARY`, `DEVFILE`, `CUSTOM`, `JKUBE_EXT_REPO`
+</ParamField>
+
+<ParamField path="openshift.namespace" type="string">
+  Target namespace/project for deployment
+  
+  **Default**: Current namespace from kubeconfig
+</ParamField>
+
+<ParamField path="openshift.kubeconfig" type="path">
+  Path to kubeconfig file
+  
+  **Default**: `~/.kube/config`
+</ParamField>
+
+<ParamField path="openshift.deployment.label" type="string">
+  Label applied to all created resources
+  
+  **Default**: `tnb-deployment`
+</ParamField>
+
+### Strategy-specific properties
+
+<ParamField path="odo.path" type="path">
+  Path to ODO CLI binary (for Devfile strategy)
+  
+  **Default**: `odo` (from PATH)
+</ParamField>
+
+<ParamField path="external.registry.url" type="string">
+  External container registry URL (for JKUBE_EXT_REPO strategy)
+</ParamField>
+
+<ParamField path="external.registry.username" type="string">
+  Registry username (for JKUBE_EXT_REPO strategy)
+</ParamField>
+
+<ParamField path="external.registry.password" type="string">
+  Registry password (for JKUBE_EXT_REPO strategy)
+</ParamField>

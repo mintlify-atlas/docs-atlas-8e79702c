@@ -1,0 +1,576 @@
+---
+title: Integration builders
+description: Classes for building and configuring Camel integrations
+---
+
+## Overview
+
+Integration builders provide a fluent API for constructing Camel integration applications. They handle route configuration, dependencies, properties, customizers, and deployment settings.
+
+## Builder hierarchy
+
+```
+AbstractIntegrationBuilder<SELF>
+  ├── IntegrationBuilder
+  └── AbstractGitIntegrationBuilder<SELF>
+        └── AbstractMavenGitIntegrationBuilder<SELF>
+              ├── SpringBootIntegrationBuilder
+              └── QuarkusIntegrationBuilder
+```
+
+## IntegrationBuilder
+
+The standard integration builder for creating integrations from route builders.
+
+**Package:** `software.tnb.product.integration.builder`
+
+### Constructor
+
+```java
+public IntegrationBuilder(String name)
+```
+
+<ParamField path="name" type="String" required>
+  The unique name identifier for the integration
+</ParamField>
+
+### Example
+
+```java
+App app = product.createIntegration(
+    new IntegrationBuilder("my-integration")
+        .fromRouteBuilder(new MyRouteBuilder())
+        .dependencies("kafka", "http")
+        .addToApplicationProperties("camel.component.kafka.brokers", "localhost:9092")
+);
+```
+
+---
+
+## AbstractIntegrationBuilder
+
+Base class providing core integration building functionality.
+
+**Package:** `software.tnb.product.integration.builder`
+
+### Route configuration
+
+#### fromRouteBuilder()
+
+Adds Camel route builders to the integration.
+
+```java
+public SELF fromRouteBuilder(RouteBuilder... routeBuilders)
+public SELF fromRouteBuilder(RouteBuilder routeBuilder, Set<String> ignoredPackages)
+```
+
+<ParamField path="routeBuilders" type="RouteBuilder..." required>
+  One or more Camel `RouteBuilder` instances containing route definitions
+</ParamField>
+
+<ParamField path="ignoredPackages" type="Set<String>">
+  Package prefixes to exclude from imports (defaults to `software.tnb`, `org.junit`, `io.fabric8`)
+</ParamField>
+
+**Example:**
+
+```java
+new IntegrationBuilder("kafka-test")
+    .fromRouteBuilder(
+        new RouteBuilder() {
+            @Override
+            public void configure() {
+                from("kafka:input-topic")
+                    .log("Message: ${body}")
+                    .to("kafka:output-topic");
+            }
+        }
+    )
+```
+
+### Dependencies
+
+#### dependencies()
+
+Adds Maven dependencies to the integration.
+
+```java
+public SELF dependencies(String... dependencies)
+public SELF dependencies(Dependency... dependencies)
+```
+
+<ParamField path="dependencies" type="String... | Dependency..." required>
+  Dependency identifiers. Strings without colons are treated as Camel component names (e.g., "kafka" becomes "camel-kafka" or "camel-quarkus-kafka"). Strings with colons are treated as Maven coordinates (e.g., "org.apache.commons:commons-lang3:3.12.0").
+</ParamField>
+
+**Example:**
+
+```java
+.dependencies("kafka", "http", "jackson")
+.dependencies("org.postgresql:postgresql:42.6.0")
+```
+
+### Properties
+
+#### addToApplicationProperties()
+
+Adds properties to the application configuration (application.properties for Spring Boot, application.yml for Quarkus).
+
+```java
+public SELF addToApplicationProperties(String key, String value)
+public SELF addToApplicationProperties(Map<String, String> properties)
+public SELF addToApplicationProperties(Properties properties)
+public SELF addToApplicationProperties(InputStream inputStream)
+```
+
+<ParamField path="key" type="String">
+  Property key
+</ParamField>
+
+<ParamField path="value" type="String">
+  Property value
+</ParamField>
+
+**Example:**
+
+```java
+.addToApplicationProperties("camel.component.kafka.brokers", "localhost:9092")
+.addToApplicationProperties(Map.of(
+    "server.port", "8080",
+    "logging.level.root", "INFO"
+))
+```
+
+#### addToSystemProperties()
+
+Adds JVM system properties.
+
+```java
+public SELF addToSystemProperties(String key, String value)
+public SELF addToSystemProperties(Map<String, String> properties)
+public SELF addToSystemProperties(Properties properties)
+```
+
+### Resources
+
+#### addClasspathResource()
+
+Adds a classpath resource to the integration.
+
+```java
+public SELF addClasspathResource(String resource)
+```
+
+<ParamField path="resource" type="String" required>
+  Path to the resource on the classpath
+</ParamField>
+
+#### addResource()
+
+Adds a resource with explicit content.
+
+```java
+public SELF addResource(Resource resource)
+```
+
+### Customizers
+
+#### addCustomizer()
+
+Adds customizers to modify the integration.
+
+```java
+public SELF addCustomizer(Customizer c, Customizer... others)
+```
+
+<ParamField path="c" type="Customizer" required>
+  Primary customizer instance
+</ParamField>
+
+<ParamField path="others" type="Customizer...">
+  Additional customizers
+</ParamField>
+
+**Example:**
+
+```java
+.addCustomizer(new RestCustomizer())
+.addCustomizer(Customizers.SPRINGBOOT.customize(builder -> {
+    builder.dependencies("actuator");
+}))
+```
+
+See [Customizers](/api/customizers) for more details.
+
+### Port configuration
+
+#### port()
+
+Configures the application HTTP port.
+
+```java
+public SELF port(int port)
+public SELF port(int port, boolean configureDefaultServer)
+```
+
+<ParamField path="port" type="int" required>
+  The port number to expose
+</ParamField>
+
+<ParamField path="configureDefaultServer" type="boolean" default="true">
+  Whether to configure this as the default HTTP server port. Set to false when using a component that starts its own server.
+</ParamField>
+
+**Example:**
+
+```java
+.port(8081)  // Application listens on 8081
+.port(9090, false)  // Expose port 9090 but don't configure default server
+```
+
+#### addAdditionalPorts()
+
+Exposes additional ports beyond the main HTTP port.
+
+```java
+public SELF addAdditionalPorts(Integer... ports)
+```
+
+### Additional classes
+
+#### addClass()
+
+Adds additional Java classes to the integration.
+
+```java
+public SELF addClass(Class<?> clazz)
+public SELF addClass(CompilationUnit cu)
+public SELF addClass(Path file)
+```
+
+<ParamField path="clazz" type="Class<?>">
+  Java class to add (sources must be available)
+</ParamField>
+
+<ParamField path="cu" type="CompilationUnit">
+  JavaParser compilation unit
+</ParamField>
+
+<ParamField path="file" type="Path">
+  Path to Java source file or directory
+</ParamField>
+
+### Plugins
+
+#### addPlugin()
+
+Adds Maven plugins to the integration build.
+
+```java
+public SELF addPlugin(Plugin p, Plugin... others)
+```
+
+### Advanced configuration
+
+#### addJavaAgent()
+
+Attaches a Java agent to the application.
+
+```java
+public SELF addJavaAgent(String javaAgentPath)
+```
+
+<ParamField path="javaAgentPath" type="String" required>
+  Path to the Java agent JAR file
+</ParamField>
+
+#### addVmArgument()
+
+Adds JVM arguments.
+
+```java
+public SELF addVmArgument(String argument)
+```
+
+<ParamField path="argument" type="String" required>
+  JVM argument (e.g., "Xmx256m", "XX:+UseG1GC")
+</ParamField>
+
+**Example:**
+
+```java
+.addVmArgument("Xmx512m")
+.addVmArgument("XX:+HeapDumpOnOutOfMemoryError")
+```
+
+#### addBytemanRule()
+
+Adds Byteman rules for bytecode manipulation.
+
+```java
+public SELF addBytemanRule(Resource rule)
+```
+
+#### startupRegex()
+
+Overrides the regex pattern used to detect application startup.
+
+```java
+public SELF startupRegex(String regex)
+```
+
+<ParamField path="regex" type="String" required>
+  Regular expression pattern to match in application logs
+</ParamField>
+
+Default: `"(?m)^.*Apache Camel.*started in.*$"`
+
+#### runApplication()
+
+Controls whether the application runs after build.
+
+```java
+public SELF runApplication(boolean runApplication)
+```
+
+### Volume configuration (OpenShift/Kubernetes)
+
+#### addConfigMapVolume()
+
+```java
+public SELF addConfigMapVolume(String name, String configMapName)
+```
+
+#### addSecretVolume()
+
+```java
+public SELF addSecretVolume(String name, String secretName)
+```
+
+#### addEmptyDirVolume()
+
+```java
+public SELF addEmptyDirVolume(String name)
+```
+
+#### addVolumeMount()
+
+```java
+public SELF addVolumeMount(String volumeName, String mountPath, boolean readOnly)
+```
+
+**Example:**
+
+```java
+.addConfigMapVolume("app-config", "my-configmap")
+.addVolumeMount("app-config", "/etc/config", true)
+```
+
+---
+
+## SpringBootIntegrationBuilder
+
+Specialized builder for Spring Boot integrations with Git repository support.
+
+**Package:** `software.tnb.product.csb.integration.builder`
+
+**Extends:** `AbstractMavenGitIntegrationBuilder<SpringBootIntegrationBuilder>`
+
+### Constructor
+
+```java
+public SpringBootIntegrationBuilder(String integrationName)
+```
+
+### Spring Boot specific methods
+
+#### fromSpringBootXmlCamelContext()
+
+Adds an XML-based Camel context configuration.
+
+```java
+public SpringBootIntegrationBuilder fromSpringBootXmlCamelContext(String camelContextPath)
+```
+
+<ParamField path="camelContextPath" type="String" required>
+  Classpath location of the Spring Boot XML Camel context file
+</ParamField>
+
+**Example:**
+
+```java
+new SpringBootIntegrationBuilder("xml-integration")
+    .fromSpringBootXmlCamelContext("camel-context.xml")
+    .dependencies("spring-boot-starter")
+```
+
+#### useExistingJar()
+
+Uses a pre-built JAR file instead of building from source.
+
+```java
+public SpringBootIntegrationBuilder useExistingJar(Path existingJar)
+```
+
+<ParamField path="existingJar" type="Path">
+  Path to existing JAR file. Pass null to enable building.
+</ParamField>
+
+**Example:**
+
+```java
+new SpringBootIntegrationBuilder("prebuilt-app")
+    .useExistingJar(Paths.get("/path/to/app.jar"))
+```
+
+### Git repository methods
+
+Inherited from `AbstractGitIntegrationBuilder`:
+
+#### fromGitRepository()
+
+```java
+public SELF fromGitRepository(String repositoryUrl)
+```
+
+<ParamField path="repositoryUrl" type="String" required>
+  Git repository URL (HTTP/HTTPS or SSH)
+</ParamField>
+
+#### withSubDirectory()
+
+```java
+public SELF withSubDirectory(String subDirectory)
+```
+
+<ParamField path="subDirectory" type="String">
+  Subdirectory within the repository containing the project
+</ParamField>
+
+#### withBranch()
+
+```java
+public SELF withBranch(String branch)
+```
+
+<ParamField path="branch" type="String" default="main">
+  Git branch to checkout
+</ParamField>
+
+#### buildProject()
+
+```java
+public SELF buildProject(boolean buildProject)
+```
+
+<ParamField path="buildProject" type="boolean" default="true">
+  Whether to build the Maven project after checkout
+</ParamField>
+
+#### cleanBeforeBuild()
+
+```java
+public SELF cleanBeforeBuild(boolean cleanBeforeBuild)
+```
+
+<ParamField path="cleanBeforeBuild" type="boolean" default="true">
+  Whether to run `mvn clean` before building
+</ParamField>
+
+### Maven configuration methods
+
+Inherited from `AbstractMavenGitIntegrationBuilder`:
+
+#### withMavenProperty()
+
+```java
+public SELF withMavenProperty(String key, String value)
+public SELF withMavenProperties(Map<String, String> props)
+```
+
+#### withJavaProperty()
+
+```java
+public SELF withJavaProperty(String key, String value)
+public SELF withJavaProperties(Map<String, String> props)
+```
+
+#### withProjectVersion()
+
+```java
+public SELF withProjectVersion(String projectVersion)
+```
+
+#### withParentVersion()
+
+```java
+public SELF withParentVersion(String parentVersion)
+```
+
+#### withFinalName()
+
+```java
+public SELF withFinalName(String finalName)
+```
+
+#### withPreMavenBuildCustomizer()
+
+```java
+public SELF withPreMavenBuildCustomizer(Consumer<Path> customizer)
+```
+
+### Complete example
+
+<CodeGroup>
+
+```java Basic integration
+App app = product.createIntegration(
+    new IntegrationBuilder("simple-route")
+        .fromRouteBuilder(new RouteBuilder() {
+            @Override
+            public void configure() {
+                from("timer:tick")
+                    .log("Tick: ${body}")
+                    .to("log:output");
+            }
+        })
+        .dependencies("timer", "log")
+);
+```
+
+```java Spring Boot with Git
+App app = product.createIntegration(
+    new SpringBootIntegrationBuilder("git-example")
+        .fromGitRepository("https://github.com/apache/camel-spring-boot-examples.git")
+        .withSubDirectory("camel-example-spring-boot")
+        .withBranch("main")
+        .withProjectVersion("3.21.0")
+        .addToApplicationProperties("server.port", "8080")
+);
+```
+
+```java Advanced configuration
+App app = product.createIntegration(
+    new IntegrationBuilder("kafka-integration")
+        .fromRouteBuilder(new KafkaRouteBuilder())
+        .dependencies("kafka", "jackson", "micrometer")
+        .addToApplicationProperties(Map.of(
+            "camel.component.kafka.brokers", "kafka:9092",
+            "camel.component.kafka.auto-offset-reset", "earliest"
+        ))
+        .addCustomizer(new RestCustomizer())
+        .port(8080)
+        .addAdditionalPorts(9090)
+        .addVmArgument("Xmx512m")
+        .addClass(CustomProcessor.class)
+        .addConfigMapVolume("config", "app-config")
+        .addVolumeMount("config", "/etc/app/config", true)
+);
+```
+
+</CodeGroup>
+
+## Related
+
+- [ProductFactory](/api/product-factory) - Create product instances
+- [Customizers](/api/customizers) - Customize integration behavior

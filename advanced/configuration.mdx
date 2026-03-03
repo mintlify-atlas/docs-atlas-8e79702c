@@ -1,0 +1,564 @@
+---
+title: Configuration system
+description: Learn how to configure TNB using system properties and configuration files
+---
+
+TNB uses a flexible configuration system built on Eclipse MicroProfile Config that allows you to customize behavior through system properties, environment variables, and properties files.
+
+## Configuration hierarchy
+
+TNB loads configuration from multiple sources with the following priority (highest to lowest):
+
+<Steps>
+  <Step title="test.properties file">
+    Properties defined in a file specified by the `test.properties` system property (ordinal 500)
+  </Step>
+  <Step title="System properties">
+    Java system properties passed via `-D` flags (ordinal 400)
+  </Step>
+  <Step title="Environment variables">
+    OS environment variables (ordinal 300)
+  </Step>
+</Steps>
+
+<Info>
+Values in `test.properties` take precedence over all other configuration sources, including system properties defined in your POM file or command line.
+</Info>
+
+## Using test.properties file
+
+The most convenient way to configure TNB is through a `test.properties` file:
+
+<Steps>
+  <Step title="Create test.properties">
+    Create a file named `test.properties` in your project root
+  </Step>
+  <Step title="Add your properties">
+    ```properties
+    test.use.openshift=true
+    test.credentials.file=~/credentials.yaml
+    openshift.kubeconfig=~/.kube/config
+    tnb.mongodb.image=mongo:7.0
+    ```
+  </Step>
+  <Step title="Run your tests">
+    The properties file is loaded automatically if named `test.properties`, or specify a custom location:
+    ```bash
+    mvn test -Dtest.properties=/path/to/custom.properties
+    ```
+  </Step>
+</Steps>
+
+## Core configuration properties
+
+### Test execution
+
+<AccordionGroup>
+  <Accordion title="test.use.openshift">
+    Deploy services on OpenShift instead of locally with TestContainers.
+    
+    **Type:** `boolean`  
+    **Default:** `false`
+    
+    ```properties
+    test.use.openshift=true
+    ```
+  </Accordion>
+
+  <Accordion title="test.use.microshift">
+    Deploy services on MicroShift (lightweight OpenShift).
+    
+    **Type:** `boolean`  
+    **Default:** `false`
+    
+    ```properties
+    test.use.microshift=true
+    ```
+  </Accordion>
+
+  <Accordion title="test.wait.time">
+    Default wait time for operations in seconds.
+    
+    **Type:** `integer`  
+    **Default:** `60`
+    
+    ```properties
+    test.wait.time=120
+    ```
+  </Accordion>
+
+  <Accordion title="test.wait.kill.timeout">
+    Timeout in minutes before forcefully killing operations.
+    
+    **Type:** `integer`  
+    **Default:** `120`
+    
+    ```properties
+    test.wait.kill.timeout=180
+    ```
+  </Accordion>
+
+  <Accordion title="test.skip.teardown">
+    Skip cleanup after tests (useful for debugging).
+    
+    **Type:** `boolean`  
+    **Default:** `false`
+    
+    ```properties
+    test.skip.teardown=true
+    ```
+  </Accordion>
+
+  <Accordion title="test.parallel">
+    Enable parallel test execution.
+    
+    **Type:** `boolean`  
+    **Default:** `false`
+    
+    ```properties
+    test.parallel=true
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### OpenShift configuration
+
+<AccordionGroup>
+  <Accordion title="openshift.url">
+    OpenShift cluster URL.
+    
+    **Type:** `string`  
+    **Required when:** `test.use.openshift=true`
+    
+    ```properties
+    openshift.url=https://api.cluster.example.com:6443
+    ```
+  </Accordion>
+
+  <Accordion title="openshift.username">
+    OpenShift login username.
+    
+    **Type:** `string`  
+    **Default:** `admin`
+    
+    ```properties
+    openshift.username=developer
+    ```
+  </Accordion>
+
+  <Accordion title="openshift.password">
+    OpenShift login password.
+    
+    **Type:** `string`  
+    **Default:** `admin`
+    
+    ```properties
+    openshift.password=mypassword
+    ```
+  </Accordion>
+
+  <Accordion title="openshift.kubeconfig">
+    Path to kubeconfig file for authentication.
+    
+    **Type:** `string`  
+    **Alternative to:** username/password authentication
+    
+    ```properties
+    openshift.kubeconfig=~/.kube/config
+    ```
+  </Accordion>
+
+  <Accordion title="openshift.namespace">
+    Namespace to use for deployments.
+    
+    **Type:** `string`  
+    **Default:** `tnb-test-<random>` (auto-generated)
+    
+    ```properties
+    openshift.namespace=my-test-namespace
+    ```
+  </Accordion>
+
+  <Accordion title="openshift.namespace.autoset">
+    Automatically set namespace based on current context.
+    
+    **Type:** `boolean`  
+    **Default:** `false`
+    
+    ```properties
+    openshift.namespace.autoset=true
+    ```
+  </Accordion>
+
+  <Accordion title="openshift.namespace.delete">
+    Delete namespace after tests complete.
+    
+    **Type:** `boolean`  
+    **Default:** `false` (or `true` if namespace is auto-generated)
+    
+    ```properties
+    openshift.namespace.delete=true
+    ```
+  </Accordion>
+
+  <Accordion title="openshift.deploy.strategy">
+    Deployment strategy for applications.
+    
+    **Type:** `string`  
+    **Default:** `jkube`
+    
+    ```properties
+    openshift.deploy.strategy=jkube
+    ```
+  </Accordion>
+
+  <Accordion title="openshift.deployment.label">
+    Label used to identify deployments.
+    
+    **Type:** `string`  
+    **Default:** `app`
+    
+    ```properties
+    openshift.deployment.label=application
+    ```
+  </Accordion>
+
+  <Accordion title="openshift.https.proxy">
+    HTTPS proxy for OpenShift communication.
+    
+    **Type:** `string`  
+    **Default:** `null`
+    
+    ```properties
+    openshift.https.proxy=http://proxy.example.com:8080
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Application configuration
+
+<AccordionGroup>
+  <Accordion title="test.app.group.id">
+    Maven group ID for test applications.
+    
+    **Type:** `string`  
+    **Default:** `com.test`
+    
+    ```properties
+    test.app.group.id=com.mycompany
+    ```
+  </Accordion>
+
+  <Accordion title="test.app.version">
+    Version for test applications.
+    
+    **Type:** `string`  
+    **Default:** `1.0.0-SNAPSHOT`
+    
+    ```properties
+    test.app.version=2.0.0
+    ```
+  </Accordion>
+
+  <Accordion title="test.app.location">
+    Directory where application artifacts are built.
+    
+    **Type:** `string`  
+    **Default:** `target`
+    
+    ```properties
+    test.app.location=build/libs
+    ```
+  </Accordion>
+
+  <Accordion title="app.template.name">
+    Template name for generated applications.
+    
+    **Type:** `string`  
+    **Default:** `tnb-app`
+    
+    ```properties
+    app.template.name=my-custom-template
+    ```
+  </Accordion>
+
+  <Accordion title="tnb.app.debug">
+    Enable debug mode for applications.
+    
+    **Type:** `boolean`  
+    **Default:** `false`
+    
+    ```properties
+    tnb.app.debug=true
+    ```
+  </Accordion>
+
+  <Accordion title="tnb.app.debug.port">
+    Debug port for remote debugging.
+    
+    **Type:** `integer`  
+    **Default:** `5005`
+    
+    ```properties
+    tnb.app.debug.port=8000
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Maven configuration
+
+<AccordionGroup>
+  <Accordion title="test.maven.repository">
+    Maven repository URL for dependencies.
+    
+    **Type:** `string`  
+    
+    ```properties
+    test.maven.repository=https://repository.example.com/maven2
+    ```
+    
+    For mirror configuration:
+    ```properties
+    test.maven.repository=https://mirror.example.com/maven2@mirrorOf=*
+    ```
+  </Accordion>
+
+  <Accordion title="test.maven.repository.id">
+    Repository ID for authentication.
+    
+    **Type:** `string`  
+    **Default:** `tnb-maven-repo`
+    
+    ```properties
+    test.maven.repository.id=my-repo
+    ```
+  </Accordion>
+
+  <Accordion title="test.maven.settings">
+    Path to custom Maven settings.xml file.
+    
+    **Type:** `string`  
+    
+    ```properties
+    test.maven.settings=/path/to/settings.xml
+    ```
+  </Accordion>
+
+  <Accordion title="test.maven.settings.file.name">
+    Name for generated Maven settings file.
+    
+    **Type:** `string`  
+    **Default:** `tnb-maven-settings.xml`
+    
+    ```properties
+    test.maven.settings.file.name=custom-settings.xml
+    ```
+  </Accordion>
+
+  <Accordion title="test.maven.extra.args">
+    Additional Maven command-line arguments.
+    
+    **Type:** `string`  
+    **Default:** `` (empty)
+    
+    ```properties
+    test.maven.extra.args=-X -DskipTests
+    ```
+  </Accordion>
+
+  <Accordion title="test.maven.transfer.progress">
+    Show Maven transfer progress.
+    
+    **Type:** `boolean`  
+    **Default:** `false`
+    
+    ```properties
+    test.maven.transfer.progress=true
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Additional properties
+
+<AccordionGroup>
+  <Accordion title="tnb.user">
+    User identifier for test tracking.
+    
+    **Type:** `string`  
+    **Default:** Current system user
+    
+    ```properties
+    tnb.user=jenkins-ci
+    ```
+  </Accordion>
+
+  <Accordion title="stream.logs">
+    Stream container/pod logs to console.
+    
+    **Type:** `boolean`  
+    **Default:** `false`
+    
+    ```properties
+    stream.logs=true
+    ```
+  </Accordion>
+
+  <Accordion title="odo.path">
+    Path to odo CLI binary.
+    
+    **Type:** `string`  
+    **Default:** Auto-detected from PATH
+    
+    ```properties
+    odo.path=/usr/local/bin/odo
+    ```
+  </Accordion>
+
+  <Accordion title="kamelets.version">
+    Apache Camel Kamelets version to use.
+    
+    **Type:** `string`  
+    
+    ```properties
+    kamelets.version=0.9.0
+    ```
+  </Accordion>
+
+  <Accordion title="test.report.portal.enabled">
+    Enable ReportPortal integration.
+    
+    **Type:** `boolean`  
+    **Default:** `false`
+    
+    ```properties
+    test.report.portal.enabled=true
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Service-specific properties
+
+Each System-X service can be configured using properties in the format `tnb.<service>.<property>`. These are covered in detail in the [Docker images](/advanced/docker-images) section.
+
+## Reading configuration in code
+
+Access configuration values programmatically:
+
+<CodeGroup>
+```java Test configuration
+import software.tnb.common.config.TestConfiguration;
+
+// Get boolean property
+boolean useOpenshift = TestConfiguration.isOpenshift();
+
+// Get string property
+String credentialsFile = TestConfiguration.credentialsFile();
+
+// Get duration property
+Duration waitTime = TestConfiguration.testWaitTime();
+```
+
+```java OpenShift configuration
+import software.tnb.common.config.OpenshiftConfiguration;
+
+// Get OpenShift settings
+String openshiftUrl = OpenshiftConfiguration.openshiftUrl();
+String namespace = OpenshiftConfiguration.openshiftNamespace();
+Path kubeconfig = OpenshiftConfiguration.openshiftKubeconfig();
+```
+
+```java Generic configuration
+import software.tnb.common.config.Configuration;
+
+// Get any property with default value
+String value = Configuration.getProperty("my.property", "default");
+boolean flag = Configuration.getBoolean("my.flag", false);
+int number = Configuration.getInteger("my.number", 42);
+```
+</CodeGroup>
+
+## Example configurations
+
+<Tabs>
+  <Tab title="Local testing">
+    ```properties
+    # Use TestContainers locally
+    test.use.openshift=false
+    
+    # Load credentials
+    test.credentials.file=~/tnb-credentials.yaml
+    
+    # Override specific service image
+    tnb.mongodb.image=mongo:7.0
+    tnb.kafka.image=confluentinc/cp-kafka:7.5.0
+    
+    # Enable log streaming
+    stream.logs=true
+    ```
+  </Tab>
+  
+  <Tab title="OpenShift testing">
+    ```properties
+    # Use OpenShift deployment
+    test.use.openshift=true
+    
+    # OpenShift cluster config
+    openshift.kubeconfig=~/.kube/config
+    openshift.namespace=my-test-namespace
+    openshift.namespace.delete=true
+    
+    # Credentials from Vault
+    test.credentials.use.vault=true
+    test.credentials.vault.token=${VAULT_TOKEN}
+    test.credentials.vault.address=https://vault.company.com
+    test.credentials.vault.path.pattern=/secret/services/%s/credentials
+    ```
+  </Tab>
+  
+  <Tab title="CI/CD pipeline">
+    ```properties
+    # Pipeline configuration
+    test.use.openshift=true
+    test.parallel=true
+    test.skip.teardown=false
+    
+    # Namespace management
+    openshift.namespace.autoset=false
+    openshift.namespace.delete=true
+    
+    # Maven settings
+    test.maven.repository=https://nexus.company.com/repository/maven-public
+    test.maven.settings=/opt/maven/settings.xml
+    
+    # Reporting
+    test.report.portal.enabled=true
+    
+    # User tracking
+    tnb.user=jenkins-pipeline
+    ```
+  </Tab>
+</Tabs>
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Use test.properties" icon="file">
+    Keep all configuration in a `test.properties` file instead of command-line arguments for better maintainability.
+  </Card>
+  
+  <Card title="Environment-specific files" icon="code-branch">
+    Create separate properties files for different environments (local, staging, production).
+  </Card>
+  
+  <Card title="Version control" icon="git">
+    Add `test.properties` to `.gitignore` if it contains sensitive values. Use a `test.properties.template` as a reference.
+  </Card>
+  
+  <Card title="Environment variables" icon="terminal">
+    Use environment variables for secrets in CI/CD pipelines instead of hardcoding in properties files.
+  </Card>
+</CardGroup>
+
+<Warning>
+Never commit credentials or sensitive information to version control. Use Vault, environment variables, or local credentials files that are gitignored.
+</Warning>

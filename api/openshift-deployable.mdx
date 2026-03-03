@@ -1,0 +1,283 @@
+---
+title: Openshift deployable
+description: Interface for managing OpenShift service deployments with pod lifecycle management
+---
+
+## Overview
+
+The `OpenshiftDeployable` interface extends `Deployable` to provide OpenShift-specific deployment capabilities. It adds pod management, readiness checks, and OpenShift resource lifecycle methods.
+
+**Package:** `software.tnb.common.deployment`
+
+**Extends:** `Deployable`
+
+## Core methods
+
+### create()
+
+```java
+void create()
+```
+
+Creates the OpenShift resources for the service. This is called by `deploy()` if the service is not already deployed.
+
+<Note>
+  Implement this method to define your OpenShift resource creation logic (deployments, services, routes, etc.).
+</Note>
+
+---
+
+### isReady()
+
+```java
+default boolean isReady()
+```
+
+Checks if all service pods are ready.
+
+<ResponseField name="return" type="boolean">
+  Returns `true` if service pods exist and all are ready, `false` otherwise.
+</ResponseField>
+
+<Info>
+  The default implementation checks that `servicePods()` returns a non-empty list and all pods are ready.
+</Info>
+
+---
+
+### isDeployed()
+
+```java
+boolean isDeployed()
+```
+
+Checks if the service is already deployed in OpenShift.
+
+<ResponseField name="return" type="boolean">
+  Returns `true` if the service resources exist in the cluster, `false` otherwise.
+</ResponseField>
+
+---
+
+### podSelector()
+
+```java
+Predicate<Pod> podSelector()
+```
+
+Provides a predicate to identify pods belonging to this service.
+
+<ResponseField name="return" type="Predicate<Pod>">
+  A predicate that returns `true` for pods belonging to this service.
+</ResponseField>
+
+<Note>
+  This is used internally by `servicePods()` to filter the pods in the namespace. Typically implemented using labels.
+</Note>
+
+## Pod management
+
+### servicePod()
+
+```java
+default PodResource servicePod()
+```
+
+Retrieves the first service pod.
+
+<ResponseField name="return" type="PodResource">
+  The first pod resource, or `null` if no pods are available.
+</ResponseField>
+
+<Info>
+  Useful for services that run a single pod. For multi-pod services, use `servicePods()` instead.
+</Info>
+
+---
+
+### servicePods()
+
+```java
+default List<PodResource> servicePods()
+```
+
+Retrieves all pods belonging to this service.
+
+<ResponseField name="return" type="List<PodResource>">
+  A list of pod resources matching the `podSelector()`, or `null` on transient errors.
+</ResponseField>
+
+<Warning>
+  Returns `null` if a `KubernetesClientException` occurs, allowing for transient network errors.
+</Warning>
+
+---
+
+### getLogs()
+
+```java
+default String getLogs()
+```
+
+Retrieves logs from the first service pod.
+
+<ResponseField name="return" type="String">
+  The pod logs as a string.
+</ResponseField>
+
+## Configuration methods
+
+### waitTime()
+
+```java
+default long waitTime()
+```
+
+Specifies the maximum time to wait for the service to become ready during deployment.
+
+<ResponseField name="return" type="long" default="300000">
+  The wait time in milliseconds. Default is 300,000ms (5 minutes).
+</ResponseField>
+
+<Info>
+  Override this method to customize the deployment timeout for services with different startup characteristics.
+</Info>
+
+## Overridden lifecycle methods
+
+### deploy()
+
+```java
+default void deploy()
+```
+
+Deploys the service to OpenShift with automatic readiness checking.
+
+**Behavior:**
+1. Calls `create()` if `isDeployed()` returns `false`
+2. Waits for `isReady()` to return `true` using `waitTime()` as the timeout
+3. Throws `TimeoutException` if the service doesn't become ready in time
+
+<Warning>
+  If deployment times out, the exception message includes all pods in the namespace to aid debugging.
+</Warning>
+
+---
+
+### restart()
+
+```java
+default void restart()
+```
+
+Restarts the service by deleting the pod and waiting for a new one to become ready.
+
+**Behavior:**
+1. Calls `closeResources()`
+2. Deletes the service pod
+3. Waits for new pods to be ready and not marked for deletion
+4. Calls `openResources()`
+
+<Info>
+  This performs a pod restart without recreating the entire deployment, which is faster than a full redeploy.
+</Info>
+
+---
+
+### afterAll()
+
+```java
+default void afterAll(ExtensionContext extensionContext) throws Exception
+```
+
+Cleans up resources after tests, with special handling for parallel test execution.
+
+<ParamField path="extensionContext" type="ExtensionContext">
+  The JUnit extension context.
+</ParamField>
+
+<Info>
+  In parallel execution mode, this method automatically deletes the test namespace to ensure isolation.
+</Info>
+
+---
+
+### enabled()
+
+```java
+default boolean enabled()
+```
+
+Determines if this deployable is enabled based on the OpenShift configuration.
+
+<ResponseField name="return" type="boolean">
+  Returns `true` if OpenShift is configured, `false` otherwise.
+</ResponseField>
+
+---
+
+### priority()
+
+```java
+default int priority()
+```
+
+Defines the deployment priority for OpenShift deployables.
+
+<ResponseField name="return" type="int" default="1">
+  Returns `1`, giving OpenShift deployables lower priority than the default `Deployable` priority of `0`.
+</ResponseField>
+
+## Usage example
+
+```java
+public class MyOpenshiftService implements OpenshiftDeployable, WithName {
+    @Override
+    public String name() {
+        return "my-service";
+    }
+
+    @Override
+    public void create() {
+        // Create deployment, service, route, etc.
+        OpenshiftClient.get().apps().deployments()
+            .create(buildDeployment());
+    }
+
+    @Override
+    public Predicate<Pod> podSelector() {
+        return p -> OpenshiftClient.get().hasLabels(p, 
+            Map.of("app", name()));
+    }
+
+    @Override
+    public void openResources() {
+        // Initialize OpenShift-aware clients
+    }
+
+    @Override
+    public void closeResources() {
+        // Clean up clients
+    }
+}
+```
+
+## Implementation notes
+
+<Note>
+  Implementations must provide `create()`, `podSelector()`, and `isDeployed()`. Consider implementing `WithName` to get default implementations of `podSelector()` and `isDeployed()`.
+</Note>
+
+<Info>
+  The interface handles deployment waiting and readiness checks automatically, reducing boilerplate in implementations.
+</Info>
+
+<Warning>
+  The `deploy()` method will retry readiness checks 60 times with intervals based on `waitTime() / 60`. Ensure your `waitTime()` is appropriate for your service's startup characteristics.
+</Warning>
+
+## Related interfaces
+
+- **WithName** - Provides default implementations of `podSelector()` and `isDeployed()` based on deployment name
+- **WithLogs** - Base interface for log retrieval
+- **Deployable** - Parent interface defining the core deployment lifecycle

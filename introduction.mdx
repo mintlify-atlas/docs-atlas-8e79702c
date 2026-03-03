@@ -1,0 +1,125 @@
+---
+title: Introduction
+description: TNB is a JUnit 5 testing framework for integration testing with external services and Camel applications
+---
+
+## The New Beginning framework
+
+TNB is a collection of JUnit 5 extensions designed for testing with external services. It simplifies integration testing by providing automatic deployment, lifecycle management, and validation utilities for over 50 external services.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Automatic deployment" icon="rocket">
+    Services are automatically deployed before tests and cleaned up afterward using JUnit 5 lifecycle hooks
+  </Card>
+  <Card title="Multiple environments" icon="layer-group">
+    Deploy services locally with TestContainers or on OpenShift clusters with a simple property change
+  </Card>
+  <Card title="50+ services" icon="database">
+    Built-in support for Kafka, databases, cloud providers, message queues, and more
+  </Card>
+  <Card title="Validation helpers" icon="check-circle">
+    Convenient methods to interact with services without dealing with complex client APIs
+  </Card>
+</CardGroup>
+
+## System-X services
+
+There are two categories of System-X services:
+
+### Remote services
+
+Internet-facing services that can be accessed publicly:
+- **Cloud providers**: AWS, Google Cloud, Azure
+- **SaaS platforms**: Salesforce, Jira, Slack
+- **External APIs**: Twitter, ServiceNow, Microsoft services
+
+Remote services don't require deployment - they only establish connections using credentials.
+
+### Self-hosted services
+
+Services deployed on-premises or in private environments:
+- **Message systems**: Kafka, RabbitMQ, IBM MQ, AMQ
+- **Databases**: PostgreSQL, MySQL, MongoDB, Cassandra
+- **File transfer**: FTP, SFTP, Samba
+- **Search engines**: Elasticsearch, OpenSearch
+- **And many more**: Redis, Vault, Keycloak, Jaeger, etc.
+
+Self-hosted services can be deployed:
+- **Locally** using TestContainers (set `test.use.openshift=false`)
+- **On OpenShift** as cluster deployments (set `test.use.openshift=true`)
+- **Externally** by connecting to an existing service (use `tnb.<serviceName>.host` property)
+
+## Service architecture
+
+Each System-X service comprises three components:
+
+<Steps>
+  <Step title="Account">
+    A Java object containing all connection information (credentials, endpoints, configuration)
+  </Step>
+  <Step title="Client">
+    The native Java client used to access the service
+  </Step>
+  <Step title="Validation">
+    A convenience wrapper around the client offering simplified methods for common operations
+  </Step>
+</Steps>
+
+## Quick example
+
+Here's a complete Kafka integration test:
+
+```java KafkaTest.java
+public class KafkaTest {
+    @RegisterExtension
+    public static Kafka kafka = ServiceFactory.create(Kafka.class);
+
+    @Test
+    public void testWithKafka() {
+        final String topic = "myTopic";
+        final String message = "Hello kafka!";
+        kafka.validation().produce(topic, message);
+
+        final List<ConsumerRecord<String, String>> records = kafka.validation().consume(topic);
+        Assertions.assertEquals(1, records.size());
+        Assertions.assertEquals(message, records.get(0).value());
+    }
+}
+```
+
+The Kafka docker container is automatically:
+- Started before tests run (using `@BeforeAll`)
+- Available during test execution
+- Stopped and cleaned up after tests complete (using `@AfterAll`)
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="play" href="/quickstart">
+    Get up and running with your first TNB test in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Add TNB dependencies to your Maven project
+  </Card>
+  <Card title="Core concepts" icon="book" href="/core-concepts/services">
+    Learn about services, accounts, and validation objects
+  </Card>
+  <Card title="Available services" icon="grid" href="/system-x/available-services">
+    Browse the complete catalog of supported System-X services
+  </Card>
+</CardGroup>
+
+## Use cases
+
+TNB is perfect for:
+
+- **Integration testing** Camel routes and microservices with real external dependencies
+- **E2E testing** complete workflows involving multiple services
+- **Local development** with production-like infrastructure using containers
+- **CI/CD pipelines** with consistent, reproducible test environments
+
+<Info>
+TNB is built and maintained by the Red Hat Fuse integration platform team for testing Camel-based applications.
+</Info>

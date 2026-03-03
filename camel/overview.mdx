@@ -1,0 +1,126 @@
+---
+title: Overview
+description: Introduction to Camel integration testing in TNB
+---
+
+The TNB Fuse Products module provides a comprehensive framework for testing Apache Camel integrations across multiple products and deployment environments. This module handles both local machine testing and OpenShift deployments with a consistent API.
+
+## What is Camel integration testing?
+
+Camel integration testing in TNB allows you to:
+
+- Write integration tests once and run them across multiple Camel products
+- Test locally during development and on OpenShift for production validation
+- Generate integration code dynamically from route builders
+- Customize integrations per product while maintaining common test logic
+- Deploy integrations using various strategies (JKube, Binary, Devfile, etc.)
+
+## Core concepts
+
+The module covers two main areas for each supported product:
+
+### Deployment
+
+Deploying and undeploying products where applicable. This includes:
+
+- Local deployment using Maven and JVM processes
+- OpenShift deployment using multiple strategies
+- Resource management and cleanup
+
+### Integrations
+
+Creating, starting, and stopping integrations:
+
+- Integration code is generated from "meta" IntegrationBuilder classes
+- Customizers allow product-specific modifications
+- Uses [JavaParser](https://javaparser.org/) framework for code transformation
+
+## How it works
+
+<Steps>
+  <Step title="Define your route builder">
+    Create a Camel `RouteBuilder` class with your integration logic.
+  </Step>
+  
+  <Step title="Build the integration">
+    Use an `IntegrationBuilder` to configure your integration, add dependencies, and apply customizers.
+  </Step>
+  
+  <Step title="Deploy">
+    Create a product instance using `ProductFactory` and deploy your integration.
+  </Step>
+  
+  <Step title="Test">
+    Run your test assertions against the deployed integration.
+  </Step>
+  
+  <Step title="Cleanup">
+    The framework automatically cleans up resources after tests.
+  </Step>
+</Steps>
+
+## Key features
+
+### Product abstraction
+
+Write tests that work across Camel Quarkus, Camel Spring Boot, and CXF Quarkus without modification.
+
+### Code generation
+
+Integration code is parsed and transformed at runtime:
+
+- Nested classes are extracted and made public
+- Final fields are inlined with their values
+- Internal TNB imports are removed
+- Package names are rewritten
+
+### Flexible deployment
+
+Choose your deployment strategy based on your needs:
+
+- **Local**: Fast development iteration
+- **JKube**: Standard OpenShift deployment
+- **Binary**: Binary S2I builds
+- **Devfile**: Dev Spaces compatible deployments
+- **Custom**: Implement your own strategy
+
+## JUnit 5 integration
+
+All products implement JUnit 5 extensions for seamless test integration:
+
+```java
+import software.tnb.product.ProductFactory;
+import org.junit.jupiter.api.extension.RegisterExtension;
+
+public class MyIntegrationTest {
+    @RegisterExtension
+    public static Product product = ProductFactory.create();
+    
+    // Your tests here
+}
+```
+
+The correct product instance is determined based on system properties:
+
+- `fuse.product`: Specifies the product (camelspringboot, camelquarkus)
+- `openshift.url`: Determines local vs OpenShift deployment
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Supported products" icon="cube" href="/camel/products">
+    Learn about Camel Quarkus, Spring Boot, and CXF Quarkus support
+  </Card>
+  
+  <Card title="Integration builders" icon="hammer" href="/camel/integration-builders">
+    Build and configure your integrations
+  </Card>
+  
+  <Card title="Customizers" icon="sliders" href="/camel/customizers">
+    Apply product-specific customizations
+  </Card>
+  
+  <Card title="Deployment strategies" icon="rocket" href="/camel/deployment-strategies">
+    Deploy to OpenShift using various strategies
+  </Card>
+</CardGroup>

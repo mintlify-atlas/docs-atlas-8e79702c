@@ -1,0 +1,205 @@
+---
+title: Service
+description: Abstract base class for all TNB services
+---
+
+## Overview
+
+`Service` is the abstract base class for all TNB services. It provides a common structure for managing accounts, clients, and validation components. Services implement JUnit 5 lifecycle callbacks for setup and teardown.
+
+## Class signature
+
+```java
+public abstract class Service<A extends Account, C, V extends Validation> 
+    implements BeforeAllCallback, AfterAllCallback
+```
+
+**Package:** `software.tnb.common.service`
+
+**Type parameters:**
+- `A` - Account type that extends `Account`
+- `C` - Client type (service-specific)
+- `V` - Validation type that extends `Validation`
+
+## Properties
+
+<ResponseField name="account" type="A">
+  The account instance containing credentials and connection details for the service
+</ResponseField>
+
+<ResponseField name="client" type="C">
+  The client instance used to interact with the service
+</ResponseField>
+
+<ResponseField name="validation" type="V">
+  The validation instance providing test utilities and assertion methods
+</ResponseField>
+
+## Methods
+
+### account()
+
+Returns the account instance for this service. The account is lazily initialized using AccountFactory.
+
+```java
+public A account()
+```
+
+<ResponseField name="return" type="A">
+  The Account instance for this service
+</ResponseField>
+
+**Example:**
+
+```java
+Kafka kafka = ServiceFactory.create(Kafka.class);
+KafkaAccount account = kafka.account();
+String bootstrapServers = account.bootstrapServers();
+```
+
+### client()
+
+Returns the client instance for this service.
+
+```java
+protected C client()
+```
+
+<ResponseField name="return" type="C">
+  The client instance for interacting with the service
+</ResponseField>
+
+<Note>
+  This method is protected and typically used internally by service implementations.
+</Note>
+
+### validation()
+
+Returns the validation instance for this service, which provides methods for testing and verification.
+
+```java
+public V validation()
+```
+
+<ResponseField name="return" type="V">
+  The Validation instance for this service
+</ResponseField>
+
+**Example:**
+
+```java
+Kafka kafka = ServiceFactory.create(Kafka.class);
+kafka.validation().createTopic("test-topic");
+```
+
+## Lifecycle methods
+
+Service implements JUnit 5 extension callbacks:
+
+### beforeAll(ExtensionContext)
+
+Called before all tests. Override this method to set up the service (deploy containers, initialize clients, etc.).
+
+```java
+public void beforeAll(ExtensionContext extensionContext) throws Exception
+```
+
+### afterAll(ExtensionContext)
+
+Called after all tests. Override this method to clean up the service (stop containers, close connections, etc.).
+
+```java
+public void afterAll(ExtensionContext extensionContext) throws Exception
+```
+
+## Implementation example
+
+Here's how to extend the Service class:
+
+```java
+public class Webhook extends Service<WebhookAccount, NoClient, WebhookValidation> {
+    
+    @Override
+    public void beforeAll(ExtensionContext extensionContext) throws Exception {
+        // Initialize the service
+        validation = new WebhookValidation();
+    }
+    
+    @Override
+    public void afterAll(ExtensionContext extensionContext) throws Exception {
+        // Clean up resources
+        if (validation != null) {
+            validation.cleanup();
+        }
+    }
+}
+```
+
+## Generic type resolution
+
+The Service class uses reflection to automatically determine the generic type parameters at runtime. This enables:
+
+- Automatic account creation via AccountFactory
+- Type-safe client initialization
+- Proper validation instance creation
+
+<Note>
+  Account instances are created lazily on first access using the AccountFactory.
+</Note>
+
+## Common service patterns
+
+<CodeGroup>
+
+```java Basic service
+public class SimpleService 
+    extends Service<SimpleAccount, SimpleClient, SimpleValidation> {
+    
+    @Override
+    protected SimpleClient client() {
+        if (client == null) {
+            client = new SimpleClient(account());
+        }
+        return client;
+    }
+    
+    @Override
+    public void beforeAll(ExtensionContext context) throws Exception {
+        validation = new SimpleValidation(client());
+    }
+}
+```
+
+```java Service without account
+public class NoAccountService 
+    extends Service<NoAccount, HttpClient, HttpValidation> {
+    
+    @Override
+    public void beforeAll(ExtensionContext context) throws Exception {
+        client = HttpClient.newHttpClient();
+        validation = new HttpValidation(client);
+    }
+}
+```
+
+```java Service with dependencies
+public class EventHubs 
+    extends Service<AzureEventHubsAccount, EventHubClients, EventHubsValidation> {
+    
+    private final StorageBlob storageBlob = ServiceFactory.create(StorageBlob.class);
+    
+    @Override
+    public void beforeAll(ExtensionContext context) throws Exception {
+        storageBlob.beforeAll(context);
+        // Initialize event hub client with storage dependency
+    }
+}
+```
+
+</CodeGroup>
+
+## Related
+
+- [ServiceFactory](/api/service-factory) - Factory for creating Service instances
+- [ConfigurableService](/api/configurable-service) - Extended service with configuration support
+- [AccountFactory](/api/account-factory) - Factory for creating Account instances

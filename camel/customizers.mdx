@@ -1,0 +1,386 @@
+---
+title: Customizers
+description: Apply product-specific customizations to Camel integrations
+---
+
+Customizers allow you to modify integrations based on the target product (Camel Quarkus, Camel Spring Boot, or CXF Quarkus). This pattern enables you to write product-agnostic integration tests while handling product-specific configurations.
+
+## Why use customizers?
+
+When your integration needs to run on multiple products with different configurations, customizers provide a clean way to handle these differences without duplicating test code.
+
+<Info>
+  Customizers are executed during integration generation. They have access to the `IntegrationBuilder` and can modify route builders, properties, dependencies, and more.
+</Info>
+
+## Customizer types
+
+TNB provides several customizer base classes:
+
+### Base customizer
+
+The abstract `Customizer` class is the foundation:
+
+```java
+package software.tnb.product.customizer;
+
+import software.tnb.product.integration.builder.AbstractIntegrationBuilder;
+
+public abstract class Customizer {
+    private ProductType product;
+    private AbstractIntegrationBuilder<?> integrationBuilder;
+    
+    public abstract void customize();
+    
+    public AbstractIntegrationBuilder<?> getIntegrationBuilder() {
+        return integrationBuilder;
+    }
+}
+```
+
+### Product-specific customizers
+
+Extend these classes to create customizers for specific products:
+
+<Tabs>
+  <Tab title="Quarkus">
+    ```java
+    import software.tnb.product.cq.customizer.QuarkusCustomizer;
+    
+    public class MyQuarkusCustomizer extends QuarkusCustomizer {
+        @Override
+        public void customize() {
+            getIntegrationBuilder()
+                .addToApplicationProperties("quarkus.http.port", "8080")
+                .dependencies("quarkus-rest");
+        }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Spring Boot">
+    ```java
+    import software.tnb.product.csb.customizer.SpringBootCustomizer;
+    
+    public class MySpringBootCustomizer extends SpringBootCustomizer {
+        @Override
+        public void customize() {
+            getIntegrationBuilder()
+                .addToApplicationProperties("server.port", "8080")
+                .dependencies("spring-boot-starter-web");
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### ProductsCustomizer
+
+Use `ProductsCustomizer` when you need different behavior for two or more products:
+
+```java
+import software.tnb.product.customizer.ProductsCustomizer;
+
+public class MyProductsCustomizer extends ProductsCustomizer {
+    @Override
+    public void customizeQuarkus() {
+        getIntegrationBuilder()
+            .addToApplicationProperties("quarkus.camel.servlet.url-patterns", "/camel/*")
+            .dependencies("rest");
+    }
+    
+    @Override
+    public void customizeSpringboot() {
+        getIntegrationBuilder()
+            .addToApplicationProperties("camel.servlet.mapping.context-path", "/camel/*")
+            .dependencies("camel-servlet");
+    }
+}
+```
+
+## Using the Customizers enum
+
+The `Customizers` enum provides a convenient way to create inline customizers:
+
+```java
+import software.tnb.product.customizer.Customizers;
+import software.tnb.product.integration.builder.IntegrationBuilder;
+
+IntegrationBuilder ib = new IntegrationBuilder("my-integration")
+    .fromRouteBuilder(routeBuilder)
+    .addCustomizer(
+        Customizers.QUARKUS.customize(builder -> {
+            builder.addToApplicationProperties("quarkus.log.level", "DEBUG");
+        }),
+        Customizers.SPRINGBOOT.customize(builder -> {
+            builder.addToApplicationProperties("logging.level.root", "DEBUG");
+        })
+    );
+```
+
+<Note>
+  This approach is cleaner than creating separate customizer classes for simple modifications.
+</Note>
+
+## Built-in component customizers
+
+TNB includes pre-built customizers for common Camel components. These handle product-specific configuration automatically.
+
+### REST customizer
+
+Configures REST endpoints with proper servlet mappings:
+
+```java
+import software.tnb.product.customizer.component.rest.RestCustomizer;
+
+IntegrationBuilder ib = new IntegrationBuilder("rest-example")
+    .fromRouteBuilder(new RouteBuilder() {
+        @Override
+        public void configure() throws Exception {
+            rest("/api")
+                .get("/hello").to("direct:hello");
+            
+            from("direct:hello")
+                .setBody(constant("Hello World"));
+        }
+    })
+    .addCustomizer(new RestCustomizer());
+```
+
+The `RestCustomizer` implementation:
+
+```java
+public class RestCustomizer extends ProductsCustomizer {
+    private static final String DEFAULT_PATH = "/camel";
+    private final String path;
+    
+    public RestCustomizer() {
+        this.path = DEFAULT_PATH;
+    }
+    
+    public RestCustomizer(String path) {
+        this.path = path;
+    }
+    
+    @Override
+    public void customizeQuarkus() {
+        getIntegrationBuilder()
+            .addToApplicationProperties("quarkus.camel.servlet.url-patterns", path + "/*")
+            .addToApplicationProperties("quarkus.openshift.route.expose", "true")
+            .dependencies("rest");
+    }
+    
+    @Override
+    public void customizeSpringboot() {
+        if (!OpenshiftConfiguration.isOpenshift()) {
+            getIntegrationBuilder()
+                .dependencies(
+                    Maven.createDependency(
+                        "org.springframework.boot:spring-boot-starter-web",
+                        "org.springframework.boot:spring-boot-starter-tomcat"
+                    )
+                )
+                .dependencies(
+                    Maven.createDependency("org.springframework.boot:spring-boot-starter-undertow")
+                );
+        }
+    }
+}
+```
+
+### Other built-in customizers
+
+TNB includes customizers for various components:
+
+<CardGroup cols={2}>
+  <Card title="DataSourceCustomizer">
+    Database connection configuration
+  </Card>
+  
+  <Card title="PahoCustomizer">
+    MQTT client configuration (Paho v3)
+  </Card>
+  
+  <Card title="PahoCustomizerMQTT5">
+    MQTT v5 client configuration
+  </Card>
+  
+  <Card title="MongoDBCustomizer">
+    MongoDB component configuration
+  </Card>
+  
+  <Card title="CxfSoapCustomizer">
+    CXF SOAP web service configuration
+  </Card>
+  
+  <Card title="CxfRestCustomizer">
+    CXF REST web service configuration
+  </Card>
+  
+  <Card title="MllpCustomizer">
+    HL7 MLLP component configuration
+  </Card>
+  
+  <Card title="SagaLRACustomizer">
+    Saga LRA pattern configuration
+  </Card>
+  
+  <Card title="AnnotatedBeanCustomizer">
+    Bean component with annotations
+  </Card>
+  
+  <Card title="CryostatCustomizer">
+    JFR profiling configuration
+  </Card>
+  
+  <Card title="BytemanCustomizer">
+    Byteman instrumentation
+  </Card>
+</CardGroup>
+
+## Accessing route builder code
+
+Customizers can modify the route builder's AST (Abstract Syntax Tree) using JavaParser:
+
+```java
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import software.tnb.product.customizer.Customizer;
+
+public class RouteModifyingCustomizer extends Customizer {
+    @Override
+    public void customize() {
+        // Get the route builder class by name
+        ClassOrInterfaceDeclaration clazz = getRouteBuilderClass("MyRouteBuilder");
+        
+        // Get the configure() method
+        MethodDeclaration configureMethod = getConfigureMethod("MyRouteBuilder");
+        
+        // Modify the AST
+        // ... JavaParser modifications ...
+    }
+}
+```
+
+<Note>
+  Modifying route builder code requires knowledge of JavaParser. See the [JavaParser documentation](https://javaparser.org/) for details.
+</Note>
+
+## Customizer execution
+
+Customizers are executed during integration generation:
+
+<Steps>
+  <Step title="Integration builder configured">
+    You create an `IntegrationBuilder` and add customizers.
+  </Step>
+  
+  <Step title="Product creates integration">
+    The `Product` calls `createIntegrationApp(integrationBuilder)`.
+  </Step>
+  
+  <Step title="Customizers execute">
+    Each customizer's `doCustomize()` method is called, which:
+    - Checks if the customizer applies to the current product
+    - Calls the `customize()` method if applicable
+  </Step>
+  
+  <Step title="Integration generated">
+    The modified integration is generated with all customizations applied.
+  </Step>
+</Steps>
+
+## Example: Multi-product HTTP configuration
+
+Here's a complete example configuring HTTP servers differently for each product:
+
+```java
+import software.tnb.product.customizer.ProductsCustomizer;
+import software.tnb.product.integration.builder.IntegrationBuilder;
+import org.apache.camel.builder.RouteBuilder;
+
+public class HttpTest {
+    @Test
+    public void testHttpEndpoint() {
+        IntegrationBuilder ib = new IntegrationBuilder("http-test")
+            .fromRouteBuilder(new RouteBuilder() {
+                @Override
+                public void configure() throws Exception {
+                    from("platform-http:/hello")
+                        .setBody(constant("Hello World"));
+                }
+            })
+            .addCustomizer(new HttpConfigCustomizer())
+            .port(8080);
+        
+        product.createIntegration(ib);
+        
+        // Test the endpoint
+        String response = RestAssured.get("/hello").asString();
+        assertEquals("Hello World", response);
+    }
+    
+    static class HttpConfigCustomizer extends ProductsCustomizer {
+        @Override
+        public void customizeQuarkus() {
+            getIntegrationBuilder()
+                .dependencies("platform-http")
+                .addToApplicationProperties("quarkus.http.port", "8080")
+                .addToApplicationProperties("quarkus.http.host", "0.0.0.0");
+        }
+        
+        @Override
+        public void customizeSpringboot() {
+            getIntegrationBuilder()
+                .dependencies("platform-http", "spring-boot-starter-web")
+                .addToApplicationProperties("server.port", "8080")
+                .addToApplicationProperties("camel.component.platform-http.spring-boot-integration", "true");
+        }
+    }
+}
+```
+
+## POM customizers
+
+For advanced Maven POM modifications, use `POMCustomizer`:
+
+```java
+import software.tnb.product.customizer.POMCustomizer;
+import org.apache.maven.model.Model;
+
+public class MyPOMCustomizer extends POMCustomizer {
+    @Override
+    public void customizePom(Model model) {
+        // Modify the Maven model directly
+        model.setName("Custom Integration Name");
+        model.setDescription("Modified via customizer");
+        
+        // Add build configuration
+        // ... modify model ...
+    }
+}
+```
+
+## Best practices
+
+<CardGroup cols={1}>
+  <Card title="Use Customizers enum for simple cases">
+    For simple property or dependency changes, use `Customizers.QUARKUS.customize()` or `Customizers.SPRINGBOOT.customize()` instead of creating separate classes.
+  </Card>
+  
+  <Card title="Create reusable customizer classes">
+    When the same customization is needed across multiple tests, create a reusable customizer class.
+  </Card>
+  
+  <Card title="Extend ProductsCustomizer for multi-product support">
+    When an integration must work on both Quarkus and Spring Boot with different configurations, extend `ProductsCustomizer`.
+  </Card>
+  
+  <Card title="Keep customizers focused">
+    Each customizer should have a single responsibility (e.g., HTTP configuration, database setup).
+  </Card>
+  
+  <Card title="Document product differences">
+    Add comments explaining why different products need different configurations.
+  </Card>
+</CardGroup>

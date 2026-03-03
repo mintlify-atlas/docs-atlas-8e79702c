@@ -1,0 +1,436 @@
+---
+title: Validation
+description: Using validation classes to interact with services in tests
+---
+
+## Overview
+
+Validation classes provide high-level, convenient methods for interacting with services in tests. They wrap around the service client and account, abstracting away the complexity of the underlying APIs.
+
+## The Validation interface
+
+The `Validation` interface is a marker interface with no required methods:
+
+```java
+public interface Validation {
+}
+```
+
+<Info>
+While the interface is empty, validation implementations provide service-specific testing utilities that make test code more readable and maintainable.
+</Info>
+
+## Why use validation classes?
+
+Validation classes serve several important purposes:
+
+<CardGroup cols={2}>
+  <Card title="Simplify client APIs" icon="wand-magic-sparkles">
+    Wrap complex client APIs with simple, test-focused methods
+  </Card>
+  
+  <Card title="Reduce boilerplate" icon="broom">
+    Eliminate repetitive setup and teardown code in tests
+  </Card>
+  
+  <Card title="Improve readability" icon="book-open">
+    Make test code more expressive and easier to understand
+  </Card>
+  
+  <Card title="Encapsulate best practices" icon="star">
+    Encode testing patterns and conventions into reusable methods
+  </Card>
+</CardGroup>
+
+## Example: KafkaValidation
+
+Let's examine a real validation class from the Kafka service.
+
+### Class structure
+
+From `KafkaValidation.java:23-31`:
+
+```java
+public class KafkaValidation<T> implements Validation {
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaValidation.class);
+    private final KafkaProducer<String, T> producer;
+    private final KafkaConsumer<String, T> consumer;
+    
+    public KafkaValidation(KafkaProducer<String, T> producer, KafkaConsumer<String, T> consumer) {
+        this.producer = producer;
+        this.consumer = consumer;
+    }
+    
+    // Methods...
+}
+```
+
+<Note>
+The validation class stores references to the Kafka producer and consumer clients, which are injected during construction.
+</Note>
+
+### Producing messages
+
+The validation class provides multiple overloaded `produce()` methods:
+
+<Tabs>
+  <Tab title="Simple produce">
+    ```java
+    public void produce(String topic, T message) {
+        produce(topic, message, Collections.emptyList());
+    }
+    ```
+    
+    **Usage:**
+    
+    ```java
+    kafka.validation().produce("myTopic", "Hello Kafka!");
+    ```
+  </Tab>
+  
+  <Tab title="Produce with headers">
+    ```java
+    public void produce(String topic, T message, List<Header> headers) {
+        StringBuilder log = new StringBuilder("Producing message \"").append(message).append("\"");
+        if (headers != null && !headers.isEmpty()) {
+            log.append(" with headers: ");
+            log.append(headers.stream().map(h -> h.key() + "=" + new String(h.value())).collect(Collectors.joining(", ")));
+        }
+        log.append(" to topic \"").append(topic).append("\"");
+        LOG.debug(log.toString());
+        producer.send(new ProducerRecord<String, T>(topic, null, null, message, headers));
+    }
+    ```
+    
+    **Usage:**
+    
+    ```java
+    List<Header> headers = List.of(
+        new RecordHeader("correlationId", "12345".getBytes()),
+        new RecordHeader("source", "test".getBytes())
+    );
+    kafka.validation().produce("myTopic", "Hello Kafka!", headers);
+    ```
+  </Tab>
+  
+  <Tab title="Produce with headers map">
+    ```java
+    public void produce(String topic, T message, Map<String, String> headers) {
+        produce(topic, message, headers.entrySet().stream()
+            .map(e -> new RecordHeader(e.getKey(), e.getValue().getBytes()))
+            .collect(Collectors.toList()));
+    }
+    ```
+    
+    **Usage:**
+    
+    ```java
+    Map<String, String> headers = Map.of(
+        "correlationId", "12345",
+        "source", "test"
+    );
+    kafka.validation().produce("myTopic", "Hello Kafka!", headers);
+    ```
+  </Tab>
+  
+  <Tab title="Produce with partition and timestamp">
+    ```java
+    public void produce(String topic, Integer partition, Long timestamp, T message, List<Header> headers) {
+        // ...
+        producer.send(new ProducerRecord(topic, partition, timestamp, Long.toString(timestamp), message, headers), 
+            new Callback() {
+                public void onCompletion(RecordMetadata recordMetadata, Exception e) {
+                    if (e == null) {
+                        LOG.debug("Received new metadata. \n"
+                            + "Topic:" + recordMetadata.topic() + "\n"
+                            + "Partition: " + recordMetadata.partition() + "\n"
+                            + "Offset: " + recordMetadata.offset() + "\n"
+                            + "Timestamp: " + recordMetadata.timestamp());
+                    } else {
+                        LOG.debug("Error while producing", e);
+                    }
+                }
+            });
+    }
+    ```
+    
+    **Usage:**
+    
+    ```java
+    kafka.validation().produce("myTopic", 0, System.currentTimeMillis(), "Hello Kafka!", null);
+    ```
+  </Tab>
+</Tabs>
+
+### Consuming messages
+
+From `KafkaValidation.java:86-90`:
+
+```java
+public List<ConsumerRecord<String, T>> consume(String topic) {
+    consumer.subscribe(Collections.singletonList(topic));
+    consumer.seekToBeginning(consumer.assignment());
+    return StreamSupport.stream(consumer.poll(Duration.ofSeconds(30)).records(topic).spliterator(), false)
+        .collect(Collectors.toList());
+}
+```
+
+**Usage:**
+
+```java
+List<ConsumerRecord<String, String>> records = kafka.validation().consume("myTopic");
+Assertions.assertEquals(1, records.size());
+Assertions.assertEquals("Hello Kafka!", records.get(0).value());
+```
+
+<Info>
+The `consume()` method automatically subscribes to the topic, seeks to the beginning, and polls for 30 seconds.
+</Info>
+
+### Resource cleanup
+
+```java
+public void closeProducer() {
+    producer.close();
+}
+
+public void closeConsumer() {
+    consumer.close();
+}
+```
+
+These methods are called automatically by the service's `closeResources()` method.
+
+## Creating validation instances
+
+Validation instances are created in the service's `beforeAll()` lifecycle method.
+
+### Example from Kafka service
+
+From `Kafka.java:36-58`:
+
+```java
+public <T> KafkaValidation<T> validation(Class<T> clazz) {
+    if (!validations.containsKey(clazz)) {
+        validations.put(clazz, createValidation(clazz));
+    }
+    return validations.get(clazz);
+}
+
+public KafkaValidation<String> validation() {
+    return validation(String.class);
+}
+
+private <T> KafkaValidation<T> createValidation(Class<T> clazz) {
+    if (clazz.isInstance(new byte[0])) {
+        props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        props.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+    } else if (clazz.isInstance("")) {
+        props.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        props.setProperty(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+    } else {
+        throw new IllegalArgumentException("Unsupported class type passed to validation() method: " + clazz.getName());
+    }
+    return new KafkaValidation<>(new KafkaProducer<>(props), new KafkaConsumer<>(props));
+}
+```
+
+<Note>
+Kafka's validation is generic and supports multiple value types (String, byte[]). The service caches validation instances by type.
+</Note>
+
+## Using validation in tests
+
+Here's a complete test example showing the validation class in action:
+
+```java
+public class KafkaTest {
+    @RegisterExtension
+    public static Kafka kafka = ServiceFactory.create(Kafka.class);
+    
+    @Test
+    public void testProduceAndConsume() {
+        final String topic = "myTopic";
+        final String message = "Hello kafka!";
+        
+        // Produce a message
+        kafka.validation().produce(topic, message);
+        
+        // Consume and verify
+        final List<ConsumerRecord<String, String>> records = kafka.validation().consume(topic);
+        Assertions.assertEquals(1, records.size());
+        Assertions.assertEquals(message, records.get(0).value());
+    }
+    
+    @Test
+    public void testProduceWithHeaders() {
+        final String topic = "headersTopic";
+        final String message = "Message with headers";
+        
+        Map<String, String> headers = Map.of(
+            "correlationId", "12345",
+            "source", "integration-test"
+        );
+        
+        // Produce with headers
+        kafka.validation().produce(topic, message, headers);
+        
+        // Consume and verify headers
+        final List<ConsumerRecord<String, String>> records = kafka.validation().consume(topic);
+        Assertions.assertEquals(1, records.size());
+        
+        ConsumerRecord<String, String> record = records.get(0);
+        Assertions.assertEquals(message, record.value());
+        
+        Header correlationId = record.headers().lastHeader("correlationId");
+        Assertions.assertEquals("12345", new String(correlationId.value()));
+    }
+}
+```
+
+## Validation design patterns
+
+When implementing your own validation classes, follow these patterns:
+
+<Steps>
+  <Step title="Store client references">
+    Accept client and account instances in the constructor and store them as fields.
+    
+    ```java
+    public class MyServiceValidation implements Validation {
+        private final MyServiceClient client;
+        private final MyServiceAccount account;
+        
+        public MyServiceValidation(MyServiceClient client, MyServiceAccount account) {
+            this.client = client;
+            this.account = account;
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Provide test-focused methods">
+    Create methods that address common testing scenarios, not just wrappers around client methods.
+    
+    ```java
+    // Good: Test-focused method
+    public void createUserAndVerify(String username, String email) {
+        User user = client.createUser(username, email);
+        assertNotNull(user.getId());
+        assertEquals(username, getUserFromAPI(user.getId()).getUsername());
+    }
+    
+    // Less ideal: Simple wrapper
+    public User createUser(String username, String email) {
+        return client.createUser(username, email);
+    }
+    ```
+  </Step>
+  
+  <Step title="Include logging">
+    Add debug logging to help with troubleshooting test failures.
+    
+    ```java
+    public void produce(String topic, T message) {
+        LOG.debug("Producing message \"{}\" to topic \"{}\"", message, topic);
+        producer.send(new ProducerRecord<>(topic, message));
+    }
+    ```
+  </Step>
+  
+  <Step title="Handle common edge cases">
+    Build in retry logic, timeouts, and error handling appropriate for testing.
+    
+    ```java
+    public List<Message> waitForMessages(String queue, int expectedCount) {
+        return WaitUtils.waitFor(
+            () -> client.getMessages(queue),
+            messages -> messages.size() >= expectedCount,
+            "Waiting for " + expectedCount + " messages in queue " + queue
+        );
+    }
+    ```
+  </Step>
+  
+  <Step title="Evolve with usage">
+    Continuously update validation classes as you discover new testing patterns.
+    
+    <Info>
+    Validation classes should grow organically based on actual test needs, not anticipated future requirements.
+    </Info>
+  </Step>
+</Steps>
+
+## Best practices
+
+<Accordion>
+  <AccordionItem title="Use validation(), not client()">
+    Access services through `validation()` in tests, not `client()`.
+    
+    ```java
+    // Good
+    kafka.validation().produce(topic, message);
+    
+    // Avoid (unless necessary)
+    kafka.client().send(new ProducerRecord<>(topic, message));
+    ```
+  </AccordionItem>
+  
+  <AccordionItem title="Keep validation methods focused">
+    Each method should serve a specific testing purpose.
+    
+    ```java
+    // Good: Specific purpose
+    public void produceMessage(String topic, String message) { ... }
+    public void produceMessageWithHeaders(String topic, String message, Map<String, String> headers) { ... }
+    
+    // Avoid: Too generic
+    public void doSomethingWithKafka(Object... args) { ... }
+    ```
+  </AccordionItem>
+  
+  <AccordionItem title="Document non-obvious behavior">
+    Add JavaDoc for methods with important behavior.
+    
+    ```java
+    /**
+     * Consumes all messages from the topic, starting from the beginning.
+     * Polls for up to 30 seconds.
+     *
+     * @param topic the topic to consume from
+     * @return list of consumed records
+     */
+    public List<ConsumerRecord<String, T>> consume(String topic) { ... }
+    ```
+  </AccordionItem>
+  
+  <AccordionItem title="Provide method overloads">
+    Offer convenience overloads with sensible defaults.
+    
+    ```java
+    public void produce(String topic, T message) {
+        produce(topic, message, Collections.emptyList());
+    }
+    
+    public void produce(String topic, T message, List<Header> headers) {
+        // Full implementation
+    }
+    ```
+  </AccordionItem>
+</Accordion>
+
+## Next steps
+
+<CardGroup cols={3}>
+  <Card title="Services" icon="cube" href="/core-concepts/services">
+    Learn about the Service abstraction
+  </Card>
+  
+  <Card title="Accounts" icon="key" href="/core-concepts/accounts">
+    Understand account management
+  </Card>
+  
+  <Card title="Deployment modes" icon="server" href="/core-concepts/deployment-modes">
+    Explore deployment options
+  </Card>
+</CardGroup>

@@ -1,0 +1,139 @@
+---
+title: Overview
+description: Learn about TNB's System-X service architecture and core concepts
+---
+
+System-X services are the foundation of TNB (The New Beginning), a collection of JUnit 5 extensions designed for testing with external services. The architecture provides a unified way to interact with both remote and self-hosted services in your tests.
+
+## Service architecture
+
+Every System-X service comprises three essential components:
+
+<CardGroup cols={3}>
+  <Card title="Account" icon="id-card">
+    A Java object containing all the information required to connect to the service, including credentials, endpoints, and configuration
+  </Card>
+  <Card title="Client" icon="plug">
+    A Java client used to access the service, providing the low-level API for service interaction
+  </Card>
+  <Card title="Validation" icon="check">
+    A wrapper around the client and account that offers convenient methods to interact with the service in tests
+  </Card>
+</CardGroup>
+
+## Service types
+
+System-X services are divided into two categories based on their deployment model:
+
+### Remote services
+
+Remote services are internet-facing services that can be accessed publicly. These services don't require deployment and only establish a connection to the remote endpoint.
+
+**Examples:** Salesforce, Jira, ServiceNow, AWS services, Azure services, Google Cloud services
+
+### Self-hosted services
+
+Self-hosted services are typically internal services that need to be deployed before use. These services can be deployed in multiple ways:
+
+**Examples:** Kafka, PostgreSQL, MongoDB, Redis, Elasticsearch, RabbitMQ
+
+## Base service interface
+
+All services extend the abstract `Service` class:
+
+```java /home/daytona/workspace/source/system-x/common/src/main/java/software/tnb/common/service/Service.java
+public abstract class Service<A extends Account, C, V extends Validation> 
+    implements BeforeAllCallback, AfterAllCallback {
+    protected A account;
+    protected C client;
+    protected V validation;
+
+    public A account() {
+        if (account == null) {
+            Class<A> accountClass = (Class<A>) ReflectionUtil.getGenericTypesOf(Service.class, this.getClass())[0];
+            account = AccountFactory.create(accountClass);
+        }
+        return account;
+    }
+
+    protected C client() {
+        return client;
+    }
+
+    public V validation() {
+        return validation;
+    }
+}
+```
+
+The service integrates with JUnit 5 lifecycle callbacks, automatically managing setup (`BeforeAllCallback`) and teardown (`AfterAllCallback`).
+
+## Creating service instances
+
+Use the `ServiceFactory` to create service instances:
+
+```java
+public class MyTest {
+    @RegisterExtension
+    public static Kafka kafka = ServiceFactory.create(Kafka.class);
+
+    @Test
+    public void testWithKafka() {
+        kafka.validation().produce("myTopic", "Hello kafka!");
+        // Test implementation
+    }
+}
+```
+
+The `ServiceFactory` automatically:
+- Selects the appropriate implementation (local or OpenShift) based on configuration
+- Initializes the service with default configuration
+- Manages the service lifecycle through JUnit extensions
+
+## Service lifecycle
+
+The typical service lifecycle in a test:
+
+<Steps>
+  <Step title="Service creation">
+    `ServiceFactory.create()` instantiates the appropriate service implementation
+  </Step>
+  <Step title="Before all tests">
+    The `beforeAll()` method deploys the service (if self-hosted) and initializes the client
+  </Step>
+  <Step title="Test execution">
+    Tests interact with the service through the validation API
+  </Step>
+  <Step title="After all tests">
+    The `afterAll()` method closes resources and undeploys the service (if self-hosted)
+  </Step>
+</Steps>
+
+## Configuration options
+
+System-X services can be configured through system properties:
+
+| Property | Description | Default |
+|----------|-------------|----------|
+| `test.use.openshift` | Deploy services on OpenShift instead of locally | `false` |
+| `tnb.<serviceName>.image` | Override the default Docker image for a service | Service-specific |
+| `tnb.<serviceName>.host` | Connect to an external service instance | None |
+| `test.credentials.file` | Path to credentials YAML file | None |
+| `test.credentials.use.vault` | Load credentials from HashiCorp Vault | `false` |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Available services" icon="list" href="/system-x/available-services">
+    Browse the complete list of 50+ System-X services
+  </Card>
+  <Card title="Remote services" icon="cloud" href="/system-x/remote-services">
+    Learn how to work with remote services
+  </Card>
+  <Card title="Self-hosted services" icon="server" href="/system-x/self-hosted-services">
+    Deploy services using TestContainers or OpenShift
+  </Card>
+  <Card title="Creating services" icon="code" href="/system-x/creating-services">
+    Build your own custom System-X service
+  </Card>
+</CardGroup>

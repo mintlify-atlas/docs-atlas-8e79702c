@@ -1,0 +1,381 @@
+---
+title: Installation
+description: Add TNB dependencies to your Maven project
+---
+
+## Maven dependencies
+
+TNB is distributed as Maven artifacts hosted on Maven Central. There are multiple ways to add TNB to your project depending on your needs.
+
+## Using individual services
+
+Add specific service dependencies for the services you want to test:
+
+```xml pom.xml
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-kafka</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+```
+
+<Info>
+This is the recommended approach as it only includes the services you actually use.
+</Info>
+
+### Available service artifacts
+
+TNB provides artifacts for each System-X service. Common examples include:
+
+<CodeGroup>
+```xml Messaging
+<!-- Kafka -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-kafka</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- RabbitMQ -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-rabbitmq</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- AMQ -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-amq</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+```
+
+```xml Databases
+<!-- PostgreSQL -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-postgresql</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- MySQL -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-mysql</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- MongoDB -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-mongodb</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- MariaDB -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-mariadb</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+```
+
+```xml Cloud providers
+<!-- AWS -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-aws</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- AWS S3 -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-aws-s3</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- Google Cloud -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-google-cloud</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- Azure -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-azure</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+```
+
+```xml Other services
+<!-- Redis -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-redis</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- Elasticsearch -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-elasticsearch</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- FTP -->
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-ftp</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+```
+</CodeGroup>
+
+## Using the BOM
+
+For easier dependency management, import the TNB BOM (Bill of Materials):
+
+```xml pom.xml
+<dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>software.tnb</groupId>
+            <artifactId>bom</artifactId>
+            <version>1.0-SNAPSHOT</version>
+            <type>pom</type>
+            <scope>import</scope>
+        </dependency>
+    </dependencies>
+</dependencyManagement>
+
+<dependencies>
+    <!-- No version needed when using BOM -->
+    <dependency>
+        <groupId>software.tnb</groupId>
+        <artifactId>system-x-kafka</artifactId>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
+```
+
+The BOM manages versions for all TNB artifacts, ensuring compatibility.
+
+## Using all services
+
+For comprehensive testing scenarios, you can include all System-X services:
+
+```xml pom.xml
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>system-x-all</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+```
+
+<Warning>
+This includes 50+ services and their dependencies. Only use this if you need access to most services. Otherwise, include individual service artifacts.
+</Warning>
+
+## Camel testing
+
+For testing Apache Camel applications, add the fuse-products module:
+
+```xml pom.xml
+<dependency>
+    <groupId>software.tnb</groupId>
+    <artifactId>fuse-products</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <scope>test</scope>
+</dependency>
+```
+
+This provides utilities for:
+- Generating Camel routes from Java DSL
+- Testing Camel integrations
+- Deploying Camel applications on OpenShift
+
+## Project requirements
+
+### Java version
+
+TNB requires Java 17 or higher:
+
+```xml pom.xml
+<properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+</properties>
+```
+
+### JUnit 5
+
+TNB is built on JUnit 5. Make sure your project includes:
+
+```xml pom.xml
+<dependency>
+    <groupId>org.junit.jupiter</groupId>
+    <artifactId>junit-jupiter</artifactId>
+    <version>5.10.0</version>
+    <scope>test</scope>
+</dependency>
+```
+
+### TestContainers
+
+For local service deployment, TNB uses TestContainers. No explicit dependency is needed - it's included transitively.
+
+Requirements:
+- Docker installed and running
+- Docker socket accessible by your user
+
+### OpenShift (optional)
+
+For OpenShift deployment:
+
+- Access to an OpenShift cluster
+- `oc` CLI tool configured
+- Valid kubeconfig with cluster credentials
+
+## Maven Surefire configuration
+
+Configure the Surefire plugin to run tests:
+
+```xml pom.xml
+<build>
+    <plugins>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <version>3.5.0</version>
+        </plugin>
+    </plugins>
+</build>
+```
+
+## Repository configuration
+
+For snapshot versions, add the Sonatype snapshot repository:
+
+```xml pom.xml
+<repositories>
+    <repository>
+        <id>sonatype-snapshots</id>
+        <url>https://s01.oss.sonatype.org/content/repositories/snapshots</url>
+        <releases>
+            <enabled>false</enabled>
+        </releases>
+        <snapshots>
+            <enabled>true</enabled>
+        </snapshots>
+    </repository>
+</repositories>
+```
+
+<Info>
+Release versions are available on Maven Central and don't require repository configuration.
+</Info>
+
+## Complete example
+
+Here's a complete `pom.xml` for a TNB test project:
+
+```xml pom.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>my-integration-tests</artifactId>
+    <version>1.0.0</version>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>software.tnb</groupId>
+                <artifactId>bom</artifactId>
+                <version>1.0-SNAPSHOT</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- TNB services -->
+        <dependency>
+            <groupId>software.tnb</groupId>
+            <artifactId>system-x-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.tnb</groupId>
+            <artifactId>system-x-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- JUnit 5 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.0</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.0</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="play" href="/quickstart">
+    Create your first TNB test
+  </Card>
+  <Card title="Available services" icon="grid" href="/system-x/available-services">
+    Browse all supported System-X services
+  </Card>
+  <Card title="Configuration" icon="gear" href="/advanced/configuration">
+    Configure service images and credentials
+  </Card>
+  <Card title="Core concepts" icon="book" href="/core-concepts/services">
+    Learn about the TNB architecture
+  </Card>
+</CardGroup>

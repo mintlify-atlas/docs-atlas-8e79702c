@@ -1,0 +1,197 @@
+---
+title: Deployable
+description: Core interface for managing service deployment lifecycle
+---
+
+## Overview
+
+The `Deployable` interface defines the contract for managing the complete lifecycle of a service deployment in TNB. It extends JUnit's `BeforeAllCallback` and `AfterAllCallback` to integrate seamlessly with test execution.
+
+**Package:** `software.tnb.common.deployment`
+
+**Extends:** `BeforeAllCallback`, `AfterAllCallback`
+
+## Core methods
+
+### deploy()
+
+```java
+void deploy()
+```
+
+Deploys the service. This method is responsible for starting and initializing the service in the target environment.
+
+<Note>
+  This method is called automatically by `beforeAll()` when used as a JUnit extension.
+</Note>
+
+---
+
+### undeploy()
+
+```java
+void undeploy()
+```
+
+Undeploys the service. This method tears down and removes the service from the target environment.
+
+<Note>
+  This method is called automatically by `afterAll()` when used as a JUnit extension.
+</Note>
+
+---
+
+### openResources()
+
+```java
+void openResources()
+```
+
+Opens all resources needed after the service is deployed, such as initializing clients and establishing connections.
+
+<Info>
+  This method is called after `deploy()` completes successfully.
+</Info>
+
+---
+
+### closeResources()
+
+```java
+void closeResources()
+```
+
+Closes all resources before the service is undeployed, performing cleanup of clients and connections.
+
+<Info>
+  This method is called before `undeploy()` is invoked.
+</Info>
+
+---
+
+### getLogs()
+
+```java
+String getLogs()
+```
+
+Retrieves logs from the deployed service.
+
+<ResponseField name="return" type="String">
+  The service logs as a string.
+</ResponseField>
+
+## Lifecycle methods
+
+### beforeAll()
+
+```java
+default void beforeAll(ExtensionContext extensionContext) throws Exception
+```
+
+JUnit extension hook that executes before all tests. Automatically calls `deploy()` followed by `openResources()`.
+
+<ParamField path="extensionContext" type="ExtensionContext">
+  The JUnit extension context.
+</ParamField>
+
+<Warning>
+  Exceptions are caught and printed before re-throwing to prevent JUnit from swallowing stack traces.
+</Warning>
+
+---
+
+### afterAll()
+
+```java
+default void afterAll(ExtensionContext extensionContext) throws Exception
+```
+
+JUnit extension hook that executes after all tests. Automatically calls `closeResources()` followed by `undeploy()`.
+
+<ParamField path="extensionContext" type="ExtensionContext">
+  The JUnit extension context.
+</ParamField>
+
+## Utility methods
+
+### restart()
+
+```java
+default void restart()
+```
+
+Restarts the service by executing the full lifecycle: close resources, undeploy, deploy, and open resources.
+
+<Info>
+  The restart sequence is: `closeResources()` → `undeploy()` → `deploy()` → `openResources()`
+</Info>
+
+---
+
+### enabled()
+
+```java
+default boolean enabled()
+```
+
+Determines whether this deployable is enabled for the current environment.
+
+<ResponseField name="return" type="boolean" default="true">
+  Returns `true` by default, indicating the deployable is enabled.
+</ResponseField>
+
+---
+
+### priority()
+
+```java
+default int priority()
+```
+
+Defines the deployment priority. Lower values indicate higher priority.
+
+<ResponseField name="return" type="int" default="0">
+  Returns `0` by default, indicating neutral priority.
+</ResponseField>
+
+## Usage example
+
+```java
+public class MyService implements Deployable {
+    @Override
+    public void deploy() {
+        // Deploy service logic
+    }
+
+    @Override
+    public void undeploy() {
+        // Undeploy service logic
+    }
+
+    @Override
+    public void openResources() {
+        // Initialize clients
+    }
+
+    @Override
+    public void closeResources() {
+        // Clean up clients
+    }
+
+    @Override
+    public String getLogs() {
+        return "service logs";
+    }
+}
+```
+
+## Implementation notes
+
+<Note>
+  Implementations must provide concrete behavior for all abstract methods: `deploy()`, `undeploy()`, `openResources()`, `closeResources()`, and `getLogs()`.
+</Note>
+
+<Info>
+  The interface provides sensible defaults for JUnit lifecycle hooks, making it easy to use deployables as test extensions.
+</Info>

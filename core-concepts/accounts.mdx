@@ -1,0 +1,404 @@
+---
+title: Accounts
+description: Managing credentials and service configuration in TNB
+---
+
+## Overview
+
+Accounts in TNB are Java objects that contain all the information required to connect to a service, including credentials, endpoints, and configuration parameters.
+
+## The Account interface
+
+The `Account` interface is minimal, providing utility methods for account manipulation:
+
+```java
+public interface Account {
+    /**
+     * Create a Properties instance from this account.
+     *
+     * @return properties instance
+     */
+    default Properties toProperties() {
+        Properties properties = new Properties();
+        for (Field field : ReflectionUtil.getAllFields(new ArrayList<>(), this.getClass())) {
+            try {
+                field.setAccessible(true);
+                // Null values can't be stored in properties
+                if (field.get(this) != null) {
+                    properties.put(StringUtils.replaceUnderscoreWithCamelCase(field.getName()), field.get(this));
+                }
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException("Unable to get field " + field.getName() + " value: ", e);
+            }
+        }
+        return properties;
+    }
+}
+```
+
+<Info>
+The `toProperties()` method automatically converts all account fields into a Java `Properties` object, useful for configuring clients.
+</Info>
+
+## Account types
+
+<Tabs>
+  <Tab title="Self-hosted service accounts">
+    For self-hosted services, account values are typically hardcoded since the service is deployed by TNB.
+    
+    ### Example: KafkaAccount
+    
+    ```java
+    public class KafkaAccount implements Account {
+        private String basicUser = "testuser";
+        private String basicPassword = "testpassword";
+        private String trustStore = "target/kafka-truststore.p12";
+        private String trustStorePassword;
+        
+        public String basicUser() {
+            return "testuser";
+        }
+        
+        public String basicPassword() {
+            return "testpassword";
+        }
+        
+        public String trustStore() {
+            return trustStore;
+        }
+        
+        public String trustStorePassword() {
+            return trustStorePassword;
+        }
+        
+        public void setTrustStorePassword(String password) {
+            this.trustStorePassword = password;
+        }
+    }
+    ```
+    
+    <Note>
+    Self-hosted service accounts use default credentials since TNB controls the deployment.
+    </Note>
+  </Tab>
+  
+  <Tab title="Remote service accounts">
+    For remote services, accounts must implement the `WithId` interface to enable credential loading from external sources.
+    
+    ### Example: AWS Account
+    
+    ```java
+    public class AWSAccount implements Account, WithId {
+        private String accessKey;
+        private String secretKey;
+        private String region;
+        private String accountId;
+        
+        @Override
+        public String credentialsId() {
+            return "aws";
+        }
+        
+        // Getters and setters...
+    }
+    ```
+    
+    The `WithId` interface enables automatic credential loading:
+    
+    ```java
+    public interface WithId {
+        String SYSTEM_PROPERTY_FORMAT = "tnb.%s.id";
+        
+        /**
+         * Get the id from system property if set, the system property is for example "tnb.awsaccount.id".
+         *
+         * @return value of system property or default id
+         */
+        default String getId() {
+            return TestConfiguration.getProperty(
+                String.format(SYSTEM_PROPERTY_FORMAT, this.getClass().getSimpleName().toLowerCase()), 
+                credentialsId()
+            );
+        }
+        
+        /**
+         * Default id.
+         *
+         * @return id
+         */
+        String credentialsId();
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Creating accounts with AccountFactory
+
+The `AccountFactory` class creates account instances and populates them with credentials:
+
+```java
+T instance = AccountFactory.create(YourAccount.class);
+```
+
+### How AccountFactory works
+
+From `AccountFactory.java:35-51`:
+
+```java
+public static <T extends Account> T create(Class<T> accountClass) {
+    T instance = createInstance(accountClass);
+    if (instance instanceof WithId) {
+        LOG.debug("Loading {} account", accountClass.getSimpleName());
+        if (loader == null) {
+            try {
+                loader = defaultLoader();
+            } catch (Exception e) {
+                fail("Could not load credentials", e);
+            }
+        }
+        return loader.get(getCredentialsIds(instance), accountClass);
+    } else {
+        LOG.debug("Initialization of {}. No credentials loading needed.", accountClass.getSimpleName());
+        return instance;
+    }
+}
+```
+
+<Steps>
+  <Step title="Create instance">
+    Instantiate the account class using reflection
+  </Step>
+  
+  <Step title="Check for WithId">
+    If the account implements `WithId`, proceed with credential loading
+  </Step>
+  
+  <Step title="Initialize loader">
+    Create a credentials loader based on configuration
+  </Step>
+  
+  <Step title="Load credentials">
+    Populate account fields from the credentials source
+  </Step>
+</Steps>
+
+## Credential loading strategies
+
+TNB supports multiple credential sources, checked in the following order:
+
+<Accordion>
+  <AccordionItem title="HashiCorp Vault (token authentication)">
+    Load credentials from HashiCorp Vault using token authentication.
+    
+    ### Configuration properties
+    
+    ```bash
+    test.credentials.use.vault=true
+    test.credentials.vault.address=https://<vault.address>
+    test.credentials.vault.token=<token>
+    test.credentials.vault.path.pattern=/path/to/services/%s/credentials
+    ```
+    
+    The `%s` in the path pattern is replaced with the account's credentials ID.
+    
+    ### Vault secret format
+    
+    The credentials in Vault must follow the same structure as the YAML format:
+    
+    ```json
+    {
+      "credentials": {
+        "access_key": "xxxx",
+        "secret_key": "xxxx",
+        "region": "us-east-1",
+        "account_id": "123456789"
+      }
+    }
+    ```
+  </AccordionItem>
+  
+  <AccordionItem title="HashiCorp Vault (AppRole authentication)">
+    Load credentials from HashiCorp Vault using AppRole authentication.
+    
+    ### Configuration properties
+    
+    ```bash
+    test.credentials.use.vault=true
+    test.credentials.vault.address=https://<vault.address>
+    test.credentials.vault.role.id=<roleId>
+    test.credentials.vault.secret.id=<secretId>
+    test.credentials.vault.path.pattern=/path/to/services/%s/credentials
+    ```
+  </AccordionItem>
+  
+  <AccordionItem title="YAML file">
+    Load credentials from a YAML file.
+    
+    ### Configuration property
+    
+    ```bash
+    test.credentials.file=/path/to/credentials.yaml
+    ```
+    
+    ### YAML file structure
+    
+    ```yaml
+    services:
+        aws:
+            credentials:
+                access_key: xxxx
+                secret_key: xxxx
+                region: xxxx
+                account_id: xxxx
+        jira:
+            credentials:
+                username: xxxx
+                password: xxxx
+        salesforce:
+            credentials:
+                username: xxxx
+                password: xxxx
+                client_id: xxxx
+                client_secret: xxxx
+    ```
+    
+    <Note>
+    Account field names must match the keys in the YAML file exactly.
+    </Note>
+  </AccordionItem>
+  
+  <AccordionItem title="YAML string (system property)">
+    Load credentials directly from a YAML string in a system property.
+    
+    ### Configuration property
+    
+    ```bash
+    test.credentials='services:
+      aws:
+        credentials:
+          access_key: xxxx
+          secret_key: xxxx'
+    ```
+    
+    The YAML format is identical to the file format.
+  </AccordionItem>
+</Accordion>
+
+## Overriding account IDs
+
+You can override the default credentials ID for any account using system properties:
+
+```bash
+tnb.<accountClassName>.id=custom-id
+```
+
+### Example
+
+For an `AWSAccount` class with a default ID of "aws":
+
+```bash
+# Use credentials from "aws-production" instead of "aws"
+tnb.awsaccount.id=aws-production
+```
+
+The property name is the account class name in lowercase.
+
+## Composite accounts
+
+Accounts can extend other accounts and inherit credentials, enabling a credential extension mechanism.
+
+### How it works
+
+When creating an account instance, `AccountFactory` checks all parent classes for the `WithId` interface and loads credentials from all IDs.
+
+### Example
+
+```java
+public class ParentAccount implements Account, WithId {
+    private String parentKey;
+    
+    @Override
+    public String credentialsId() {
+        return "parent";
+    }
+}
+
+public class ChildAccount extends ParentAccount {
+    private String childKey;
+    
+    @Override
+    public String credentialsId() {
+        return "child";
+    }
+}
+```
+
+### Credentials file
+
+```yaml
+services:
+    parent:
+        credentials:
+            parentKey: parentValue
+    child:
+        credentials:
+            childKey: childValue
+```
+
+When you create a `ChildAccount`:
+
+```java
+ChildAccount account = AccountFactory.create(ChildAccount.class);
+```
+
+The resulting account has both `parentKey` and `childKey` populated.
+
+<Info>
+Credentials are merged in order from parent to child, with child values overriding parent values if there are conflicts.
+</Info>
+
+### Partial composite accounts
+
+At least one of the credentials IDs must exist. This allows for flexible credential structures:
+
+```yaml
+services:
+    child:
+        credentials:
+            parentKey: parentValue
+            childKey: childValue
+```
+
+This is valid even though the "parent" entry doesn't exist, as long as all required fields are in the "child" entry.
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Never commit secrets" icon="shield-halved">
+    Use external credential sources (Vault or YAML files) and add them to `.gitignore`.
+  </Card>
+  
+  <Card title="Use environment-specific IDs" icon="layer-group">
+    Override account IDs per environment (dev, staging, production) using system properties.
+  </Card>
+  
+  <Card title="Implement WithId for remote services" icon="plug">
+    Always implement `WithId` for accounts that need external credentials.
+  </Card>
+  
+  <Card title="Use composite accounts for reuse" icon="recycle">
+    Share common credentials across multiple accounts using inheritance.
+  </Card>
+</CardGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Services" icon="cube" href="/core-concepts/services">
+    Learn about the Service abstraction
+  </Card>
+  
+  <Card title="Validation" icon="check" href="/core-concepts/validation">
+    Understand validation classes
+  </Card>
+</CardGroup>

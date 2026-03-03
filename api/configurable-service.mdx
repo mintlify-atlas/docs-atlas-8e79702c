@@ -1,0 +1,259 @@
+---
+title: ConfigurableService
+description: Extended Service class with configuration support for flexible deployments
+---
+
+## Overview
+
+`ConfigurableService` extends the Service class to support services that can have multiple deployment configurations. It provides a typed configuration object that can be customized before service initialization.
+
+<Note>
+  It's not recommended to use ConfigurableService with ReusableOpenshiftDeployable, as different configurations in the same test run may cause deployment conflicts.
+</Note>
+
+## Class signature
+
+```java
+public abstract class ConfigurableService<A extends Account, C, V extends Validation, S extends ServiceConfiguration> 
+    extends Service<A, C, V>
+```
+
+**Package:** `software.tnb.common.service`
+
+**Type parameters:**
+- `A` - Account type that extends `Account`
+- `C` - Client type (service-specific)
+- `V` - Validation type that extends `Validation`
+- `S` - Service configuration type that extends `ServiceConfiguration`
+
+## Properties
+
+<ResponseField name="configuration" type="S">
+  The configuration instance for this service, automatically instantiated based on the generic type parameter
+</ResponseField>
+
+Inherits all properties from [Service](/api/service):
+- `account` - The account instance
+- `client` - The client instance  
+- `validation` - The validation instance
+
+## Methods
+
+### getConfiguration()
+
+Returns the configuration instance for this service.
+
+```java
+public S getConfiguration()
+```
+
+<ResponseField name="return" type="S">
+  The ServiceConfiguration instance for customizing service behavior
+</ResponseField>
+
+**Example:**
+
+```java
+AWSService aws = ServiceFactory.create(AWSService.class);
+aws.getConfiguration().useLocalstack(true);
+aws.getConfiguration().setRegion("us-west-2");
+```
+
+### defaultConfiguration()
+
+Abstract method that must be implemented to define default configuration values. Called automatically by ServiceFactory after instantiation.
+
+```java
+protected abstract void defaultConfiguration()
+```
+
+**Example:**
+
+```java
+@Override
+protected void defaultConfiguration() {
+    getConfiguration().useLocalstack(false);
+    getConfiguration().setRegion("us-east-1");
+}
+```
+
+### account()
+
+Overrides the Service method to use ConfigurableService's generic type resolution.
+
+```java
+public A account()
+```
+
+<ResponseField name="return" type="A">
+  The Account instance for this service
+</ResponseField>
+
+## Implementation example
+
+Here's how to implement a ConfigurableService:
+
+```java
+public abstract class AWSService<A extends AWSAccount, C extends SdkClient, V extends Validation>
+    extends ConfigurableService<A, C, V, AWSConfiguration> {
+    
+    protected LocalStack localStack;
+    
+    @Override
+    protected void defaultConfiguration() {
+        getConfiguration().useLocalstack(false);
+    }
+    
+    @Override
+    protected C client() {
+        if (client == null) {
+            Class<C> clientClass = (Class<C>) ReflectionUtil
+                .getGenericTypesOf(AWSService.class, this.getClass())[1];
+            client = AWSClient.createDefaultClient(
+                account(), 
+                clientClass, 
+                getConfiguration().isLocalstack() ? localStack.clientUrl() : null
+            );
+        }
+        return client;
+    }
+    
+    @Override
+    public void beforeAll(ExtensionContext extensionContext) throws Exception {
+        if (getConfiguration().isLocalstack()) {
+            localStack = ServiceFactory.create(LocalStack.class);
+            localStack.beforeAll(extensionContext);
+        }
+    }
+    
+    @Override
+    public void afterAll(ExtensionContext extensionContext) throws Exception {
+        if (client != null) {
+            client.close();
+            client = null;
+        }
+        if (localStack != null) {
+            localStack.afterAll(extensionContext);
+        }
+    }
+}
+```
+
+## Configuration patterns
+
+<CodeGroup>
+
+```java Default configuration
+// Service uses default configuration
+SQS sqs = ServiceFactory.create(SQS.class);
+// defaultConfiguration() was already called
+```
+
+```java Custom configuration
+// Customize configuration before use
+SQS sqs = ServiceFactory.create(SQS.class, config -> {
+    config.useLocalstack(true);
+    config.setQueuePrefix("test-");
+});
+```
+
+```java Multiple configurations
+// Same service, different configs in different tests
+class Test1 {
+    @RegisterExtension
+    static SQS sqs = ServiceFactory.create(SQS.class, 
+        config -> config.useLocalstack(true));
+}
+
+class Test2 {
+    @RegisterExtension
+    static SQS sqs = ServiceFactory.create(SQS.class, 
+        config -> config.useLocalstack(false));
+}
+```
+
+```java Configuration with lifecycle
+// Automatic lifecycle management with custom config
+ServiceFactory.withService(
+    LDAP.class,
+    config -> {
+        config.setBaseDN("dc=example,dc=com");
+        config.setAdminPassword("secret");
+    },
+    ldap -> {
+        ldap.validation().createUser("testuser");
+    }
+);
+```
+
+</CodeGroup>
+
+## Configuration classes
+
+Service configurations extend `ServiceConfiguration`:
+
+```java
+public class AWSConfiguration extends ServiceConfiguration {
+    private boolean useLocalstack;
+    private String region;
+    
+    public boolean isLocalstack() {
+        return useLocalstack;
+    }
+    
+    public void useLocalstack(boolean useLocalstack) {
+        this.useLocalstack = useLocalstack;
+    }
+    
+    public String getRegion() {
+        return region;
+    }
+    
+    public void setRegion(String region) {
+        this.region = region;
+    }
+}
+```
+
+## Common configurable services
+
+Many TNB services extend ConfigurableService:
+
+- **AWS services** - Configure region, localstack usage
+- **Database services** - Configure connection pools, schemas
+- **Message brokers** - Configure topics, queues, clusters
+- **HTTP services** - Configure ports, routes, authentication
+
+## Configuration lifecycle
+
+1. **Service creation** - ConfigurableService instantiated
+2. **Configuration instantiation** - Configuration object created via reflection
+3. **Default configuration** - `defaultConfiguration()` called by ServiceFactory
+4. **Custom configuration** - User's configuration Consumer applied (if provided)
+5. **Service initialization** - `beforeAll()` uses configuration values
+
+<Note>
+  Configuration must be set before calling `beforeAll()`. Changes after initialization may not take effect.
+</Note>
+
+## Best practices
+
+### Do
+
+- Define sensible defaults in `defaultConfiguration()`
+- Make configuration immutable after `beforeAll()`
+- Validate configuration values in `beforeAll()`
+- Document configuration options clearly
+
+### Don't
+
+- Don't modify configuration after service initialization
+- Don't use ConfigurableService with ReusableOpenshiftDeployable
+- Don't skip `defaultConfiguration()` implementation
+- Don't make configuration changes thread-unsafe
+
+## Related
+
+- [Service](/api/service) - Base class for all services
+- [ServiceFactory](/api/service-factory) - Factory for creating configured services
+- [AccountFactory](/api/account-factory) - Factory for creating accounts

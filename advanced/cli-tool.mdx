@@ -1,0 +1,550 @@
+---
+title: JBang CLI tool
+description: Use TNB System-X services from your terminal with the tnb CLI tool
+---
+
+The TNB CLI tool allows you to deploy and interact with System-X services directly from your terminal without writing test cases. It's powered by JBang and provides an interactive Groovy shell.
+
+## Installation
+
+<Steps>
+  <Step title="Install JBang">
+    First, ensure you have JBang installed. Visit [jbang.dev](https://www.jbang.dev/) for installation instructions.
+    
+    ```bash
+    # macOS
+    brew install jbangdev/tap/jbang
+    
+    # Linux
+    curl -Ls https://sh.jbang.dev | bash -s - app setup
+    
+    # Windows
+    choco install jbang
+    ```
+  </Step>
+  
+  <Step title="Build TNB locally">
+    Clone and build the TNB project:
+    
+    ```bash
+    git clone https://github.com/tnb-software/TNB.git
+    cd TNB
+    mvn clean install -DskipTests
+    ```
+  </Step>
+  
+  <Step title="Install tnb command">
+    Register the `tnb` command globally:
+    
+    ```bash
+    jbang app install jbang/tnb.java
+    ```
+    
+    This creates a global `tnb` command in your PATH.
+  </Step>
+  
+  <Step title="Verify installation">
+    Test the installation:
+    
+    ```bash
+    tnb
+    ```
+    
+    You should see the Groovy shell prompt.
+  </Step>
+</Steps>
+
+<Info>
+The CLI uses a Groovy shell, so all Groovy language features are available for scripting and automation.
+</Info>
+
+## Basic usage
+
+### Deploying services
+
+Deploy System-X services using the `deploy` command:
+
+<Tabs>
+  <Tab title="Local deployment">
+    ```groovy
+    // Deploy services locally using TestContainers (default)
+    tnb> deploy Kafka
+    
+    tnb> deploy MongoDB
+    
+    tnb> deploy PostgreSQL
+    ```
+    
+    Services are deployed as Docker containers on your local machine.
+  </Tab>
+  
+  <Tab title="OpenShift deployment">
+    ```groovy
+    // Deploy to OpenShift with --openshift flag
+    tnb> deploy Kafka --openshift
+    
+    tnb> deploy MongoDB --openshift
+    ```
+    
+    Or set OpenShift mode persistently:
+    ```groovy
+    tnb> setOpenshift
+    tnb> deploy Kafka  // Now deploys to OpenShift
+    ```
+    
+    Switch back to local:
+    ```groovy
+    tnb> setLocal
+    tnb> deploy Kafka  // Now deploys locally
+    ```
+  </Tab>
+</Tabs>
+
+### Using deployed services
+
+After deployment, you'll get a variable name to interact with the service:
+
+```groovy
+tnb> deploy Kafka
+Deploying Kafka...
+Service deployed successfully!
+Use 'kafka' to interact with the service.
+
+tnb> kafka.validation().createTopic("my-topic")
+tnb> kafka.validation().produce("my-topic", "Hello from CLI!")
+tnb> def records = kafka.validation().consume("my-topic")
+tnb> records.each { println it.value() }
+Hello from CLI!
+```
+
+<Note>
+Press TAB after typing a service name to see available methods:
+```groovy
+tnb> kafka.validation().[TAB]
+```
+This shows all validation methods you can use.
+</Note>
+
+### Undeploying services
+
+<Tabs>
+  <Tab title="Manual undeploy">
+    ```groovy
+    // Undeploy a specific service
+    tnb> undeploy kafka
+    
+    // Undeploy all services
+    tnb> undeploy
+    ```
+  </Tab>
+  
+  <Tab title="Automatic undeploy">
+    Services are automatically undeployed when you exit the CLI:
+    
+    ```groovy
+    tnb> exit
+    ```
+    
+    Or press `Ctrl+D` to exit.
+  </Tab>
+</Tabs>
+
+## Configuration
+
+The CLI uses the `~/.tnb` directory for configuration and state.
+
+### Directory structure
+
+```
+~/.tnb/
+├── init.groovy           # Startup script (executed on launch)
+├── credentials/          # Stored credentials
+│   ├── aws.properties
+│   ├── jira.properties
+│   └── ...
+└── history              # Command history
+```
+
+### Initialization script
+
+Create `~/.tnb/init.groovy` to set up properties and configurations on startup:
+
+```groovy ~/.tnb/init.groovy
+// Set credentials file
+System.setProperty('test.credentials.file', System.getProperty('user.home') + '/credentials.yaml')
+
+// OpenShift configuration
+System.setProperty('openshift.kubeconfig', System.getProperty('user.home') + '/.kube/config')
+
+// Enable log streaming
+System.setProperty('stream.logs', 'true')
+
+// Custom service images
+System.setProperty('tnb.mongodb.image', 'mongo:7.0')
+System.setProperty('tnb.kafka.image', 'confluentinc/cp-kafka:7.5.0')
+
+// Helper function
+def deployAll(services) {
+    services.each { deploy it }
+}
+
+println "Custom TNB environment loaded!"
+```
+
+### Credential handling
+
+The CLI has special credential management:
+
+<Steps>
+  <Step title="Interactive prompt">
+    When deploying a service requiring credentials, you'll be prompted if they're not found:
+    
+    ```
+    tnb> deploy AWS
+    Credentials for 'aws' not found.
+    Enter access_key: AKIAIOSFODNN7EXAMPLE
+    Enter secret_key: ********
+    Enter region: us-east-1
+    ```
+  </Step>
+  
+  <Step title="Automatic storage">
+    Entered credentials are saved to `~/.tnb/credentials/<id>.properties`:
+    
+    ```properties ~/.tnb/credentials/aws.properties
+    access_key=AKIAIOSFODNN7EXAMPLE
+    secret_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    region=us-east-1
+    ```
+  </Step>
+  
+  <Step title="Reuse">
+    Stored credentials are automatically loaded for future sessions.
+  </Step>
+</Steps>
+
+<Warning>
+Credentials stored in `~/.tnb/credentials/` are in plain text. Ensure proper file permissions:
+```bash
+chmod 600 ~/.tnb/credentials/*
+```
+</Warning>
+
+## Advanced usage
+
+### Multiple services
+
+Deploy and orchestrate multiple services:
+
+```groovy
+// Deploy multiple services
+tnb> deploy Kafka
+tnb> deploy MongoDB
+tnb> deploy PostgreSQL
+
+// Use them together
+tnb> kafka.validation().produce("events", '{"userId": 123}')
+tnb> def event = kafka.validation().consume("events")[0].value()
+
+tnb> import groovy.json.JsonSlurper
+tnb> def json = new JsonSlurper().parseText(event)
+tnb> mongodb.validation().insertDocument("users", json)
+```
+
+### Scripting
+
+Create Groovy scripts to automate tasks:
+
+```groovy test-scenario.groovy
+// Load the script in tnb
+tnb> load 'test-scenario.groovy'
+
+// Or run it directly
+jbang jbang/tnb.java test-scenario.groovy
+```
+
+Example script:
+
+```groovy test-scenario.groovy
+// Deploy services
+deploy Kafka
+deploy MongoDB
+
+// Wait for readiness
+Thread.sleep(5000)
+
+// Create test data
+kafka.validation().createTopic("orders")
+
+// Produce messages
+100.times { i ->
+    kafka.validation().produce("orders", "Order #${i}")
+}
+
+// Consume and verify
+def records = kafka.validation().consume("orders", 100)
+assert records.size() == 100
+
+println "Test completed successfully!"
+
+// Cleanup
+undeploy
+```
+
+### Custom service configuration
+
+Configure services before deployment:
+
+```groovy
+tnb> import software.tnb.common.service.ServiceFactory
+tnb> import software.tnb.splunk.service.Splunk
+tnb> import software.tnb.splunk.service.configuration.SplunkConfiguration.SplunkProtocol
+
+// Create service with configuration
+tnb> def splunk = ServiceFactory.create(Splunk.class, config -> 
+     config.protocol(SplunkProtocol.HTTP))
+
+tnb> splunk.validation().sendEvent("test", "my event")
+```
+
+### Working with external services
+
+Connect to external service instances:
+
+```groovy
+// Set external host property
+tnb> System.setProperty('tnb.kafka.host', 'kafka.example.com:9092')
+
+// Deploy will now connect to external instance instead of creating new one
+tnb> deploy Kafka
+
+tnb> kafka.validation().listTopics()
+```
+
+## Integration with OpenShift
+
+### Prerequisites
+
+Ensure you're logged into OpenShift:
+
+```bash
+oc login https://api.cluster.example.com:6443
+oc project my-namespace
+```
+
+### Deploying to OpenShift
+
+```groovy
+tnb> setOpenshift
+tnb> deploy Kafka
+
+// Check deployment status
+tnb> !oc get pods
+
+// View logs
+tnb> !oc logs -f kafka-entity-operator-...
+```
+
+<Note>
+Use `!` prefix to execute shell commands from within the TNB CLI:
+```groovy
+tnb> !oc get routes
+tnb> !kubectl get svc
+```
+</Note>
+
+### Configuration in init.groovy
+
+```groovy ~/.tnb/init.groovy
+// OpenShift configuration
+System.setProperty('test.use.openshift', 'true')
+System.setProperty('openshift.kubeconfig', System.getProperty('user.home') + '/.kube/config')
+System.setProperty('openshift.namespace', 'tnb-testing')
+System.setProperty('openshift.namespace.delete', 'false')
+
+println "OpenShift mode enabled by default"
+```
+
+## Examples
+
+<Tabs>
+  <Tab title="Kafka workflow">
+    ```groovy
+    // Start Kafka
+    tnb> deploy Kafka
+    
+    // Create topic
+    tnb> kafka.validation().createTopic("my-topic", 3, 1)
+    
+    // Produce messages
+    tnb> 10.times { i ->
+         kafka.validation().produce("my-topic", "key-${i}", "Message ${i}")
+     }
+    
+    // Consume messages
+    tnb> def records = kafka.validation().consume("my-topic", 10)
+    tnb> records.each { println "${it.key()}: ${it.value()}" }
+    
+    // List topics
+    tnb> kafka.validation().listTopics().each { println it }
+    
+    // Cleanup
+    tnb> kafka.validation().deleteTopic("my-topic")
+    tnb> undeploy kafka
+    ```
+  </Tab>
+  
+  <Tab title="MongoDB workflow">
+    ```groovy
+    // Deploy MongoDB
+    tnb> deploy MongoDB
+    
+    // Insert documents
+    tnb> mongodb.validation().insertDocument("testdb", "users", 
+         [name: "John", age: 30])
+    tnb> mongodb.validation().insertDocument("testdb", "users", 
+         [name: "Jane", age: 25])
+    
+    // Query documents
+    tnb> def users = mongodb.validation().findDocuments("testdb", "users")
+    tnb> users.each { println it }
+    
+    // Count documents
+    tnb> def count = mongodb.validation().countDocuments("testdb", "users")
+    tnb> println "Total users: ${count}"
+    
+    // Cleanup
+    tnb> mongodb.validation().dropDatabase("testdb")
+    tnb> undeploy mongodb
+    ```
+  </Tab>
+  
+  <Tab title="Multi-service">
+    ```groovy
+    // Deploy services
+    tnb> deploy Kafka
+    tnb> deploy MongoDB
+    
+    // Create integration flow
+    tnb> kafka.validation().createTopic("events")
+    
+    // Produce events to Kafka
+    tnb> import groovy.json.JsonBuilder
+    tnb> def event = new JsonBuilder()
+    tnb> event {
+         userId 123
+         action "login"
+         timestamp System.currentTimeMillis()
+     }
+    tnb> kafka.validation().produce("events", event.toString())
+    
+    // Consume from Kafka and store in MongoDB
+    tnb> import groovy.json.JsonSlurper
+    tnb> def slurper = new JsonSlurper()
+    tnb> kafka.validation().consume("events").each { record ->
+         def data = slurper.parseText(record.value())
+         mongodb.validation().insertDocument("analytics", "events", data)
+     }
+    
+    // Query MongoDB
+    tnb> def events = mongodb.validation().findDocuments("analytics", "events")
+    tnb> println "Stored ${events.size()} events in MongoDB"
+    
+    // Cleanup
+    tnb> undeploy
+    ```
+  </Tab>
+</Tabs>
+
+## Tips and tricks
+
+<CardGroup cols={2}>
+  <Card title="Tab completion" icon="keyboard">
+    Use TAB to autocomplete service methods and explore available APIs interactively.
+  </Card>
+  
+  <Card title="Command history" icon="clock-rotate-left">
+    Press ↑/↓ to navigate command history. History is persisted in `~/.tnb/history`.
+  </Card>
+  
+  <Card title="Shell commands" icon="terminal">
+    Execute shell commands with `!` prefix: `!ls`, `!oc get pods`, `!docker ps`
+  </Card>
+  
+  <Card title="Import libraries" icon="book">
+    Import any Java/Groovy library: `import org.apache.commons.lang3.StringUtils`
+  </Card>
+  
+  <Card title="Multi-line commands" icon="code">
+    Press Enter without completing a statement to continue on the next line.
+  </Card>
+  
+  <Card title="Save session" icon="floppy-disk">
+    Save your commands to a script file for reuse: `save 'my-session.groovy'`
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="JBang not found">
+    Ensure JBang is installed and in your PATH:
+    ```bash
+    jbang version
+    ```
+    
+    If not found, reinstall following the [JBang installation guide](https://www.jbang.dev/download/).
+  </Accordion>
+  
+  <Accordion title="TNB not built">
+    The `tnb` command requires TNB to be built locally:
+    ```bash
+    cd TNB
+    mvn clean install -DskipTests
+    jbang app install jbang/tnb.java
+    ```
+  </Accordion>
+  
+  <Accordion title="Service deployment fails">
+    Check Docker is running for local deployments:
+    ```bash
+    docker ps
+    ```
+    
+    For OpenShift deployments, verify you're logged in:
+    ```bash
+    oc whoami
+    oc project
+    ```
+  </Accordion>
+  
+  <Accordion title="Credentials not found">
+    Ensure credentials are configured in `~/.tnb/init.groovy` or available in `~/.tnb/credentials/`.
+    
+    You can also set them manually:
+    ```groovy
+    System.setProperty('test.credentials.file', '/path/to/credentials.yaml')
+    ```
+  </Accordion>
+  
+  <Accordion title="Service already deployed">
+    If a service is already running, undeploy it first:
+    ```groovy
+    tnb> undeploy kafka
+    tnb> deploy Kafka
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Demo
+
+Watch the TNB CLI in action:
+
+[![TNB CLI Demo](https://asciinema.org/a/585241.svg)](https://asciinema.org/a/585241)
+
+The demo shows:
+- Installing the CLI
+- Deploying services
+- Interactive usage
+- Validation methods
+- Cleanup

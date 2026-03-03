@@ -1,0 +1,267 @@
+---
+title: Services
+description: Understanding the Service abstraction in TNB
+---
+
+## Overview
+
+The `Service` class is the foundation of TNB's testing framework. Every System-X service extends this abstract class, which provides a consistent interface for accessing accounts, clients, and validation helpers.
+
+## The Service abstraction
+
+The `Service` class is a generic abstract class that manages three key components:
+
+```java
+public abstract class Service<A extends Account, C, V extends Validation> 
+    implements BeforeAllCallback, AfterAllCallback {
+    
+    protected A account;
+    protected C client;
+    protected V validation;
+    
+    public A account() {
+        if (account == null) {
+            Class<A> accountClass = (Class<A>) ReflectionUtil.getGenericTypesOf(Service.class, this.getClass())[0];
+            account = AccountFactory.create(accountClass);
+        }
+        return account;
+    }
+    
+    protected C client() {
+        return client;
+    }
+    
+    public V validation() {
+        return validation;
+    }
+}
+```
+
+<Info>
+The `Service` class implements JUnit 5's `BeforeAllCallback` and `AfterAllCallback` interfaces, enabling automatic lifecycle management when used with `@RegisterExtension`.
+</Info>
+
+## Service components
+
+Each service consists of three parts:
+
+<Steps>
+  <Step title="Account">
+    A Java object containing all information required to connect to the service (credentials, endpoints, configuration)
+  </Step>
+  
+  <Step title="Client">
+    A Java client used to access the service directly (may be a third-party SDK or custom implementation)
+  </Step>
+  
+  <Step title="Validation">
+    A wrapper around the client and account offering convenient methods for testing
+  </Step>
+</Steps>
+
+## Service types
+
+TNB supports two categories of System-X services:
+
+<Tabs>
+  <Tab title="Remote services">
+    Remote services are internet-facing services that can be accessed publicly, such as:
+    
+    - Twitter
+    - Salesforce
+    - Cloud providers (AWS, Google Cloud, Azure)
+    
+    These services don't require deployment - they only establish a connection.
+    
+    ### Example remote service
+    
+    ```java
+    @AutoService(MyService.class)
+    public class MyService implements Service {
+        private MyServiceAccount account;
+        private MyServiceClient client;
+        private MyServiceValidation validation;
+        
+        public MyServiceAccount account() {
+            if (account == null) {
+                account = AccountFactory.create(MyServiceAccount.class);
+            }
+            return account;
+        }
+        
+        protected MyServiceClient client() {
+            client = new MyServiceClient("https://myservice.com");
+            return client;
+        }
+        
+        public MyServiceValidation validation() {
+            return validation;
+        }
+        
+        @Override
+        public void beforeAll(ExtensionContext extensionContext) throws Exception {
+            validation = new MyServiceValidation(client(), account());
+        }
+        
+        @Override
+        public void afterAll(ExtensionContext extensionContext) throws Exception {
+            if (client != null) {
+                client.close();
+            }
+        }
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Self-hosted services">
+    Self-hosted services are typically internal services that must be deployed before testing:
+    
+    - Messaging systems (Kafka, ActiveMQ)
+    - Databases (PostgreSQL, MySQL, MongoDB)
+    - File transfer systems (FTP, SFTP)
+    
+    These services can be deployed locally using TestContainers or on OpenShift.
+    
+    ### Example self-hosted service
+    
+    ```java
+    public abstract class Kafka extends Service<KafkaAccount, NoClient, KafkaValidation<?>> {
+        protected Map<Class<?>, KafkaValidation> validations;
+        protected Properties props = defaultClientProperties();
+        
+        public abstract String bootstrapServers();
+        
+        public abstract String bootstrapSSLServers();
+        
+        public abstract void createTopic(String name, int partitions, int replicas);
+        
+        public <T> KafkaValidation<T> validation(Class<T> clazz) {
+            if (!validations.containsKey(clazz)) {
+                validations.put(clazz, createValidation(clazz));
+            }
+            return validations.get(clazz);
+        }
+        
+        public KafkaValidation<String> validation() {
+            return validation(String.class);
+        }
+        
+        public void openResources() {
+            validations = new HashMap<>();
+        }
+        
+        public void closeResources() {
+            if (validations != null) {
+                validations.values().forEach(validation -> {
+                    validation.closeProducer();
+                    validation.closeConsumer();
+                });
+                validations = null;
+            }
+        }
+    }
+    ```
+    
+    <Note>
+    See [Deployment modes](/core-concepts/deployment-modes) for details on local vs OpenShift deployments.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Creating services with ServiceFactory
+
+The `ServiceFactory` class provides factory methods for creating service instances:
+
+```java
+public class KafkaTest {
+    @RegisterExtension
+    public static Kafka kafka = ServiceFactory.create(Kafka.class);
+    
+    @Test
+    public void testWithKafka() {
+        final String topic = "myTopic";
+        final String message = "Hello kafka!";
+        kafka.validation().produce(topic, message);
+        
+        final List<ConsumerRecord<String, String>> records = kafka.validation().consume(topic);
+        Assertions.assertEquals(1, records.size());
+        Assertions.assertEquals(message, records.get(0).value());
+    }
+}
+```
+
+### How ServiceFactory works
+
+The `ServiceFactory.create()` method:
+
+1. Uses Java's `ServiceLoader` to discover implementations
+2. If multiple implementations exist (e.g., `LocalKafka` and `OpenshiftKafka`), selects based on:
+   - The `test.use.openshift` system property
+   - Implementation priority
+   - Enabled status
+3. Returns the appropriate instance
+
+Relevant code from `ServiceFactory.java:40-64`:
+
+```java
+if (loader.stream().count() == 1) {
+    return loader.findFirst().get();
+}
+
+// Sort the services based on the priority and then return the first one that is enabled
+Optional<S> service = StreamSupport.stream(loader.spliterator(), false)
+    .sorted((s1, s2) -> ((Deployable) s2).priority() - ((Deployable) s1).priority())
+    .filter(s -> ((Deployable) s).enabled())
+    .findFirst();
+```
+
+## Service lifecycle
+
+Services automatically manage their lifecycle through JUnit 5 callbacks:
+
+<Accordion title="Lifecycle methods">
+  <AccordionItem title="beforeAll()">
+    Called before all tests in a test class:
+    
+    - Deploys the service (for self-hosted services)
+    - Opens resources (initializes clients and connections)
+    - Creates validation instances
+  </AccordionItem>
+  
+  <AccordionItem title="afterAll()">
+    Called after all tests in a test class:
+    
+    - Closes resources (closes clients and connections)
+    - Undeploys the service (for self-hosted services)
+  </AccordionItem>
+</Accordion>
+
+## Using services in tests
+
+Services expose three main methods for test interaction:
+
+| Method | Description | Example |
+|--------|-------------|----------|
+| `account()` | Returns the account object with credentials and configuration | `kafka.account().basicUser()` |
+| `client()` | Returns the underlying client (protected, for advanced usage) | `kafka.client()` |
+| `validation()` | Returns the validation helper with convenient test methods | `kafka.validation().produce(topic, message)` |
+
+<Note>
+In most cases, you'll interact with services through the `validation()` method, which provides high-level testing utilities.
+</Note>
+
+## Next steps
+
+<CardGroup cols={3}>
+  <Card title="Accounts" icon="key" href="/core-concepts/accounts">
+    Learn about account management and credential loading
+  </Card>
+  
+  <Card title="Validation" icon="check" href="/core-concepts/validation">
+    Understand validation classes and their role
+  </Card>
+  
+  <Card title="Deployment modes" icon="server" href="/core-concepts/deployment-modes">
+    Explore local vs OpenShift deployment
+  </Card>
+</CardGroup>

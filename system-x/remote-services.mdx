@@ -1,0 +1,340 @@
+---
+title: Remote services
+description: Learn how to work with remote System-X services like Salesforce, AWS, and other cloud platforms
+---
+
+Remote services are internet-facing services that can be accessed publicly. Unlike self-hosted services, remote services don't require deployment and only establish a connection to the external endpoint.
+
+## Remote service characteristics
+
+Remote services:
+- **No deployment required** - Services are already running and accessible
+- **Require credentials** - Need valid account credentials to connect
+- **Internet connectivity** - Tests must have network access to the service endpoint
+- **Lifecycle management** - Only handle connection setup and teardown
+
+## Common remote services
+
+<CardGroup cols={2}>
+  <Card title="Cloud providers" icon="cloud">
+    AWS, Azure, Google Cloud Platform
+  </Card>
+  <Card title="SaaS platforms" icon="building">
+    Salesforce, Jira, ServiceNow, Slack
+  </Card>
+  <Card title="Communication" icon="message">
+    Telegram, Microsoft Exchange, Gmail
+  </Card>
+  <Card title="Webhooks" icon="webhook">
+    Webhook.site for webhook testing
+  </Card>
+</CardGroup>
+
+## Implementing a remote service
+
+Here's the structure of a typical remote service implementation:
+
+```java /home/daytona/workspace/source/system-x/services/salesforce/src/main/java/software/tnb/salesforce/service/Salesforce.java
+@AutoService(Salesforce.class)
+public class Salesforce extends Service<SalesforceAccount, ForceApi, SalesforceValidation> {
+    private static final Logger LOG = LoggerFactory.getLogger(Salesforce.class);
+
+    protected ForceApi client() {
+        if (client == null) {
+            client = new ForceApi(new ApiConfig()
+                .setClientId(account().clientId())
+                .setClientSecret(account().clientSecret())
+                .setUsername(account().userName())
+                .setPassword(account().password())
+                .setForceURL(account().loginUrl()));
+        }
+        return client;
+    }
+
+    public SalesforceValidation validation() {
+        if (validation == null) {
+            LOG.debug("Creating new Salesforce validation");
+            validation = new SalesforceValidation(client());
+        }
+        return validation;
+    }
+
+    @Override
+    public void afterAll(ExtensionContext extensionContext) throws Exception {
+        // Cleanup resources if needed
+    }
+
+    @Override
+    public void beforeAll(ExtensionContext extensionContext) throws Exception {
+        // Initialize connection
+    }
+}
+```
+
+## Key implementation details
+
+### The @AutoService annotation
+
+```java
+@AutoService(Salesforce.class)
+public class Salesforce extends Service<...> {
+    // Implementation
+}
+```
+
+The `@AutoService` annotation enables automatic service discovery via Java's ServiceLoader mechanism. This allows `ServiceFactory` to locate and instantiate the service.
+
+### Service lifecycle methods
+
+Remote services implement JUnit 5 lifecycle callbacks:
+
+<Steps>
+  <Step title="beforeAll()">
+    Called before any tests run. Initialize the client connection and create the validation instance.
+  </Step>
+  <Step title="Test execution">
+    Tests interact with the service through the validation API.
+  </Step>
+  <Step title="afterAll()">
+    Called after all tests complete. Close client connections and cleanup resources.
+  </Step>
+</Steps>
+
+### Account management
+
+Remote services require credentials stored in an Account class. The account is loaded automatically:
+
+```java
+// Account is loaded via AccountFactory
+public A account() {
+    if (account == null) {
+        Class<A> accountClass = (Class<A>) ReflectionUtil.getGenericTypesOf(Service.class, this.getClass())[0];
+        account = AccountFactory.create(accountClass);
+    }
+    return account;
+}
+```
+
+## Configuring credentials
+
+Remote services need credentials to connect. TNB supports multiple credential sources:
+
+### YAML credentials file
+
+Create a credentials file and reference it with the `test.credentials.file` property:
+
+```yaml
+services:
+    salesforce:
+        credentials:
+            client_id: your_client_id
+            client_secret: your_client_secret
+            user_name: your_username
+            password: your_password
+            login_url: https://login.salesforce.com
+    aws:
+        credentials:
+            access_key: AKIA...
+            secret_key: xyz...
+            region: us-east-1
+            account_id: "123456789012"
+    jira:
+        credentials:
+            username: admin@example.com
+            password: your_api_token
+            url: https://your-domain.atlassian.net
+```
+
+Then run your tests with:
+
+```bash
+mvn test -Dtest.credentials.file=/path/to/credentials.yaml
+```
+
+### HashiCorp Vault
+
+Load credentials from Vault by setting these properties:
+
+```bash
+test.credentials.use.vault=true
+test.credentials.vault.address=https://vault.example.com
+test.credentials.vault.token=your_vault_token
+# Or use role-based authentication:
+test.credentials.vault.role.id=your_role_id
+test.credentials.vault.secret.id=your_secret_id
+
+# Path pattern where credentials are stored
+test.credentials.vault.path.pattern=/secret/services/%s/credentials
+```
+
+### System property YAML
+
+Pass credentials directly as a YAML string:
+
+```bash
+mvn test -Dtest.credentials="services:
+  aws:
+    credentials:
+      access_key: AKIA..."
+```
+
+### Overriding account IDs
+
+Each account has a default ID that matches the credential key in the YAML file. Override it using:
+
+```bash
+# Override AWS account ID lookup
+-Dtnb.awsaccount.id=aws-production
+```
+
+## Example: Using AWS S3
+
+Here's a complete example of using the AWS S3 remote service:
+
+<Steps>
+  <Step title="Create credentials file">
+    ```yaml credentials.yaml
+    services:
+        aws:
+            credentials:
+                access_key: AKIA...
+                secret_key: abc123...
+                region: us-east-1
+                account_id: "123456789012"
+    ```
+  </Step>
+  <Step title="Write the test">
+    ```java
+    import software.tnb.aws.s3.service.S3;
+    import software.tnb.common.service.ServiceFactory;
+    import org.junit.jupiter.api.Test;
+    import org.junit.jupiter.api.extension.RegisterExtension;
+
+    public class S3Test {
+        @RegisterExtension
+        public static S3 s3 = ServiceFactory.create(S3.class);
+
+        @Test
+        public void testS3Upload() {
+            String bucket = "my-test-bucket";
+            String key = "test-file.txt";
+            String content = "Hello S3!";
+            
+            // Create bucket
+            s3.validation().createBucket(bucket);
+            
+            // Upload file
+            s3.validation().putObject(bucket, key, content);
+            
+            // Verify
+            String retrieved = s3.validation().getObject(bucket, key);
+            assertEquals(content, retrieved);
+        }
+    }
+    ```
+  </Step>
+  <Step title="Run the test">
+    ```bash
+    mvn test -Dtest.credentials.file=credentials.yaml
+    ```
+  </Step>
+</Steps>
+
+## Example: Using Salesforce
+
+```java
+import software.tnb.salesforce.service.Salesforce;
+import software.tnb.common.service.ServiceFactory;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+
+public class SalesforceTest {
+    @RegisterExtension
+    public static Salesforce salesforce = ServiceFactory.create(Salesforce.class);
+
+    @Test
+    public void testCreateAccount() {
+        // Create a Salesforce Account record
+        Map<String, Object> account = new HashMap<>();
+        account.put("Name", "Test Company");
+        account.put("Industry", "Technology");
+        
+        String accountId = salesforce.validation().createRecord("Account", account);
+        assertNotNull(accountId);
+        
+        // Query the account
+        Map<String, Object> result = salesforce.validation()
+            .queryRecord("SELECT Name, Industry FROM Account WHERE Id = '" + accountId + "'");
+        
+        assertEquals("Test Company", result.get("Name"));
+    }
+}
+```
+
+## Composite accounts
+
+Some services may share credentials with a parent service. TNB supports composite accounts:
+
+```java
+public class ParentAccount implements Account, WithId {
+    private String parentKey;
+
+    @Override
+    public String credentialsId() {
+        return "parent";
+    }
+}
+
+public class ChildAccount extends ParentAccount {
+    private String childKey;
+
+    @Override
+    public String credentialsId() {
+        return "child";
+    }
+}
+```
+
+```yaml
+services:
+    parent:
+        credentials:
+            parentKey: parentValue
+    child:
+        credentials:
+            childKey: childValue
+```
+
+When `AccountFactory.create(ChildAccount.class)` is called, both parent and child credentials are merged.
+
+<Warning>
+Never commit credentials to your source control. Always use external credential management through YAML files, Vault, or environment variables.
+</Warning>
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Use Vault for CI/CD" icon="vault">
+    Store credentials in HashiCorp Vault for automated testing environments
+  </Card>
+  <Card title="Validate connections early" icon="check">
+    Add connection validation in beforeAll() to fail fast if credentials are invalid
+  </Card>
+  <Card title="Implement cleanup" icon="broom">
+    Clean up created resources in afterAll() to avoid accumulating test data
+  </Card>
+  <Card title="Handle rate limits" icon="gauge">
+    Implement retry logic and backoff for services with rate limiting
+  </Card>
+</CardGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Self-hosted services" icon="server" href="/system-x/self-hosted-services">
+    Learn about services that require deployment
+  </Card>
+  <Card title="Creating services" icon="code" href="/system-x/creating-services">
+    Build your own custom System-X service
+  </Card>
+</CardGroup>

@@ -1,0 +1,609 @@
+---
+title: Creating services
+description: Build your own custom System-X services for TNB
+---
+
+Learn how to create custom System-X services that integrate seamlessly with TNB's testing framework. This guide covers both remote and self-hosted service implementations.
+
+## Prerequisites
+
+Before creating a service, ensure you understand:
+
+- The [System-X service architecture](/system-x/overview)
+- The difference between [remote](/system-x/remote-services) and [self-hosted](/system-x/self-hosted-services) services
+- Java generics and inheritance
+- JUnit 5 extension model
+
+## Service components
+
+Every System-X service requires three components:
+
+<Steps>
+  <Step title="Account class">
+    Holds connection credentials and configuration
+  </Step>
+  <Step title="Client instance">
+    Provides the API for interacting with the service
+  </Step>
+  <Step title="Validation class">
+    Wraps the client with convenient test methods
+  </Step>
+</Steps>
+
+## Creating a remote service
+
+Remote services connect to existing external services and don't require deployment.
+
+### Step 1: Create the account class
+
+The account stores credentials and connection information:
+
+```java
+package software.tnb.myservice.account;
+
+import software.tnb.common.account.Account;
+import software.tnb.common.account.WithId;
+
+public class MyServiceAccount implements Account, WithId {
+    private String apiKey;
+    private String apiSecret;
+    private String endpoint;
+
+    @Override
+    public String credentialsId() {
+        return "myservice";
+    }
+
+    // Getters and setters
+    public String apiKey() {
+        return apiKey;
+    }
+
+    public void setApiKey(String apiKey) {
+        this.apiKey = apiKey;
+    }
+
+    public String apiSecret() {
+        return apiSecret;
+    }
+
+    public void setApiSecret(String apiSecret) {
+        this.apiSecret = apiSecret;
+    }
+
+    public String endpoint() {
+        return endpoint != null ? endpoint : "https://api.myservice.com";
+    }
+
+    public void setEndpoint(String endpoint) {
+        this.endpoint = endpoint;
+    }
+}
+```
+
+### Step 2: Create the validation class
+
+The validation class provides convenient methods for tests:
+
+```java
+package software.tnb.myservice.validation;
+
+import software.tnb.common.validation.Validation;
+import software.tnb.myservice.account.MyServiceAccount;
+
+public class MyServiceValidation implements Validation {
+    private final MyServiceClient client;
+    private final MyServiceAccount account;
+
+    public MyServiceValidation(MyServiceClient client, MyServiceAccount account) {
+        this.client = client;
+        this.account = account;
+    }
+
+    // Convenient methods for tests
+    public String createResource(String name, Map<String, Object> properties) {
+        return client.create("/resources", Map.of("name", name, "properties", properties));
+    }
+
+    public Map<String, Object> getResource(String id) {
+        return client.get("/resources/" + id);
+    }
+
+    public void deleteResource(String id) {
+        client.delete("/resources/" + id);
+    }
+
+    public List<Map<String, Object>> listResources() {
+        return client.list("/resources");
+    }
+}
+```
+
+### Step 3: Create the service class
+
+The service class ties everything together:
+
+```java
+package software.tnb.myservice.service;
+
+import software.tnb.common.service.Service;
+import software.tnb.myservice.account.MyServiceAccount;
+import software.tnb.myservice.validation.MyServiceValidation;
+import org.junit.jupiter.api.extension.ExtensionContext;
+import com.google.auto.service.AutoService;
+
+@AutoService(MyService.class)
+public class MyService extends Service<MyServiceAccount, MyServiceClient, MyServiceValidation> {
+    
+    @Override
+    protected MyServiceClient client() {
+        if (client == null) {
+            client = new MyServiceClient(
+                account().endpoint(),
+                account().apiKey(),
+                account().apiSecret()
+            );
+        }
+        return client;
+    }
+
+    @Override
+    public MyServiceValidation validation() {
+        if (validation == null) {
+            validation = new MyServiceValidation(client(), account());
+        }
+        return validation;
+    }
+
+    @Override
+    public void beforeAll(ExtensionContext extensionContext) throws Exception {
+        // Initialize resources before tests
+        LOG.debug("Connecting to MyService at {}", account().endpoint());
+    }
+
+    @Override
+    public void afterAll(ExtensionContext extensionContext) throws Exception {
+        // Clean up resources after tests
+        if (client != null) {
+            client.close();
+        }
+    }
+}
+```
+
+### Step 4: Add service discovery
+
+Create a `META-INF/services` file for auto-discovery:
+
+```text src/main/resources/META-INF/services/software.tnb.myservice.service.MyService
+software.tnb.myservice.service.MyService
+```
+
+<Note>
+The `@AutoService` annotation automatically generates this file if you use the annotation processor.
+</Note>
+
+### Step 5: Use the service
+
+Create a credentials file:
+
+```yaml credentials.yaml
+services:
+    myservice:
+        credentials:
+            api_key: your_api_key
+            api_secret: your_api_secret
+            endpoint: https://api.myservice.com
+```
+
+Use in tests:
+
+```java
+import software.tnb.myservice.service.MyService;
+import software.tnb.common.service.ServiceFactory;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+
+public class MyServiceTest {
+    @RegisterExtension
+    public static MyService service = ServiceFactory.create(MyService.class);
+
+    @Test
+    public void testMyService() {
+        String id = service.validation().createResource("test", Map.of("key", "value"));
+        assertNotNull(id);
+        
+        Map<String, Object> resource = service.validation().getResource(id);
+        assertEquals("test", resource.get("name"));
+    }
+}
+```
+
+## Creating a self-hosted service
+
+Self-hosted services require deployment support for both TestContainers and OpenShift.
+
+### Step 1: Create the abstract base service
+
+```java
+package software.tnb.myservice.service;
+
+import software.tnb.common.deployment.WithDockerImage;
+import software.tnb.common.service.Service;
+import software.tnb.myservice.account.MyServiceAccount;
+import software.tnb.myservice.validation.MyServiceValidation;
+
+public abstract class MyService extends Service<MyServiceAccount, MyServiceClient, MyServiceValidation> 
+    implements WithDockerImage {
+    
+    // Abstract methods that deployment-specific implementations must provide
+    public abstract String hostname();
+    public abstract int port();
+
+    @Override
+    public String defaultImage() {
+        return "quay.io/myorg/myservice:1.0";
+    }
+
+    protected MyServiceClient client() {
+        if (client == null) {
+            client = new MyServiceClient(hostname(), port());
+        }
+        return client;
+    }
+
+    public MyServiceValidation validation() {
+        if (validation == null) {
+            validation = new MyServiceValidation(client());
+        }
+        return validation;
+    }
+
+    public void openResources() {
+        // Called after deployment to initialize clients
+        client();
+        validation();
+    }
+
+    public void closeResources() {
+        // Called before undeployment to close connections
+        if (client != null) {
+            client.close();
+            client = null;
+        }
+        validation = null;
+    }
+}
+```
+
+### Step 2: Create the local (TestContainers) implementation
+
+```java
+package software.tnb.myservice.resource.local;
+
+import software.tnb.common.deployment.ContainerDeployable;
+import software.tnb.myservice.service.MyService;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
+import com.google.auto.service.AutoService;
+
+@AutoService(MyService.class)
+public class LocalMyService extends MyService implements ContainerDeployable<MyServiceContainer> {
+    private static final Logger LOG = LoggerFactory.getLogger(LocalMyService.class);
+    private MyServiceContainer container;
+
+    @Override
+    public void deploy() {
+        LOG.info("Starting MyService container");
+        container = new MyServiceContainer(image());
+        container.start();
+        LOG.info("MyService container started");
+    }
+
+    @Override
+    public void undeploy() {
+        if (container != null) {
+            LOG.info("Stopping MyService container");
+            container.stop();
+        }
+    }
+
+    @Override
+    public MyServiceContainer container() {
+        return container;
+    }
+
+    @Override
+    public String hostname() {
+        return container.getHost();
+    }
+
+    @Override
+    public int port() {
+        return container.getMappedPort(8080);
+    }
+}
+```
+
+Create the container class:
+
+```java
+package software.tnb.myservice.resource.local;
+
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.wait.strategy.Wait;
+
+public class MyServiceContainer extends GenericContainer<MyServiceContainer> {
+    private static final int PORT = 8080;
+
+    public MyServiceContainer(String image) {
+        super(image);
+        withExposedPorts(PORT);
+        waitingFor(Wait.forHttp("/health").forStatusCode(200));
+        withEnv("SERVICE_MODE", "test");
+    }
+
+    public int getServicePort() {
+        return getMappedPort(PORT);
+    }
+}
+```
+
+### Step 3: Create the OpenShift implementation
+
+```java
+package software.tnb.myservice.resource.openshift;
+
+import software.tnb.common.deployment.OpenshiftDeployable;
+import software.tnb.common.deployment.WithExternalHostname;
+import software.tnb.common.deployment.WithName;
+import software.tnb.common.openshift.OpenshiftClient;
+import software.tnb.myservice.service.MyService;
+import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.api.model.Service;
+import io.fabric8.kubernetes.api.model.apps.Deployment;
+import com.google.auto.service.AutoService;
+
+@AutoService(MyService.class)
+public class OpenshiftMyService extends MyService 
+    implements OpenshiftDeployable, WithName, WithExternalHostname {
+    
+    private static final Logger LOG = LoggerFactory.getLogger(OpenshiftMyService.class);
+
+    @Override
+    public void create() {
+        LOG.info("Deploying MyService to OpenShift");
+        
+        // Create deployment
+        Deployment deployment = new DeploymentBuilder()
+            .withNewMetadata()
+                .withName(name())
+                .addToLabels("app", name())
+            .endMetadata()
+            .withNewSpec()
+                .withReplicas(1)
+                .withNewSelector()
+                    .addToMatchLabels("app", name())
+                .endSelector()
+                .withNewTemplate()
+                    .withNewMetadata()
+                        .addToLabels("app", name())
+                    .endMetadata()
+                    .withNewSpec()
+                        .addNewContainer()
+                            .withName(name())
+                            .withImage(image())
+                            .addNewPort()
+                                .withContainerPort(8080)
+                                .withName("http")
+                            .endPort()
+                        .endContainer()
+                    .endSpec()
+                .endTemplate()
+            .endSpec()
+            .build();
+        
+        OpenshiftClient.get().apps().deployments().create(deployment);
+        
+        // Create service
+        Service service = new ServiceBuilder()
+            .withNewMetadata()
+                .withName(name())
+                .addToLabels("app", name())
+            .endMetadata()
+            .withNewSpec()
+                .addToSelector("app", name())
+                .addNewPort()
+                    .withPort(8080)
+                    .withName("http")
+                .endPort()
+            .endSpec()
+            .build();
+        
+        OpenshiftClient.get().services().create(service);
+        
+        // Create route
+        OpenshiftClient.get().routes().createOrReplace(/* route definition */);
+    }
+
+    @Override
+    public void undeploy() {
+        LOG.info("Undeploying MyService from OpenShift");
+        OpenshiftClient.get().apps().deployments().withName(name()).delete();
+        OpenshiftClient.get().services().withName(name()).delete();
+        OpenshiftClient.get().routes().withName(name()).delete();
+    }
+
+    @Override
+    public boolean isReady() {
+        return OpenshiftClient.get().apps().deployments()
+            .withName(name())
+            .isReady();
+    }
+
+    @Override
+    public boolean isDeployed() {
+        return OpenshiftClient.get().apps().deployments()
+            .withName(name())
+            .get() != null;
+    }
+
+    @Override
+    public String name() {
+        return "myservice";
+    }
+
+    @Override
+    public String externalHostname() {
+        return OpenshiftClient.get().routes()
+            .withName(name())
+            .get()
+            .getSpec()
+            .getHost();
+    }
+
+    @Override
+    public String hostname() {
+        return externalHostname();
+    }
+
+    @Override
+    public int port() {
+        return 443; // HTTPS through route
+    }
+}
+```
+
+## Adding service configuration
+
+For services that need configuration, extend `ConfigurableService`:
+
+### Step 1: Create configuration class
+
+```java
+package software.tnb.myservice.service.configuration;
+
+import software.tnb.common.service.configuration.ServiceConfiguration;
+
+public class MyServiceConfiguration extends ServiceConfiguration {
+    private static final String PROTOCOL = "myservice.protocol";
+    private static final String TIMEOUT = "myservice.timeout";
+
+    public MyServiceConfiguration protocol(String protocol) {
+        set(PROTOCOL, protocol);
+        return this;
+    }
+
+    public String getProtocol() {
+        return get(PROTOCOL, String.class);
+    }
+
+    public MyServiceConfiguration timeout(int seconds) {
+        set(TIMEOUT, seconds);
+        return this;
+    }
+
+    public int getTimeout() {
+        return get(TIMEOUT, Integer.class);
+    }
+}
+```
+
+### Step 2: Update service to use ConfigurableService
+
+```java
+public abstract class MyService extends ConfigurableService<MyServiceAccount, MyServiceClient, 
+    MyServiceValidation, MyServiceConfiguration> implements WithDockerImage {
+    
+    // Use configuration in methods
+    protected MyServiceClient client() {
+        if (client == null) {
+            client = new MyServiceClient(
+                hostname(), 
+                port(),
+                getConfiguration().getProtocol(),
+                getConfiguration().getTimeout()
+            );
+        }
+        return client;
+    }
+}
+```
+
+### Step 3: Use with configuration
+
+```java
+@RegisterExtension
+public static MyService service = ServiceFactory.create(
+    MyService.class,
+    config -> config
+        .protocol("https")
+        .timeout(30)
+);
+```
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Use meaningful names" icon="tag">
+    Name validation methods clearly to describe what they do (e.g., `createUser()` not `create()`)
+  </Card>
+  <Card title="Implement cleanup" icon="broom">
+    Always clean up resources in `closeResources()` and `afterAll()`
+  </Card>
+  <Card title="Add logging" icon="file-lines">
+    Use SLF4J logging to help debug deployment and connection issues
+  </Card>
+  <Card title="Wait for readiness" icon="clock">
+    Implement proper readiness checks, especially for OpenShift deployments
+  </Card>
+  <Card title="Handle errors gracefully" icon="shield">
+    Wrap exceptions with meaningful error messages
+  </Card>
+  <Card title="Document examples" icon="book">
+    Provide usage examples in JavaDoc or README files
+  </Card>
+</CardGroup>
+
+## Testing your service
+
+Create tests to verify your service implementation:
+
+```java
+public class MyServiceTest {
+    @RegisterExtension
+    public static MyService service = ServiceFactory.create(MyService.class);
+
+    @Test
+    public void testLocalDeployment() {
+        // Test runs with TestContainers by default
+        assertNotNull(service.validation());
+        assertTrue(service.hostname().contains("localhost"));
+    }
+
+    @Test
+    public void testServiceOperations() {
+        String id = service.validation().createResource("test", Map.of());
+        assertNotNull(id);
+        
+        service.validation().deleteResource(id);
+    }
+}
+```
+
+Test with OpenShift:
+
+```bash
+mvn test -Dtest.use.openshift=true
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Overview" icon="book" href="/system-x/overview">
+    Review System-X architecture concepts
+  </Card>
+  <Card title="Available services" icon="list" href="/system-x/available-services">
+    See examples of existing services
+  </Card>
+</CardGroup>

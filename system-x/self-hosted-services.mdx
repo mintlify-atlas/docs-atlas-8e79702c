@@ -1,0 +1,465 @@
+---
+title: Self-hosted services
+description: Deploy and test with self-hosted services using TestContainers or OpenShift
+---
+
+Self-hosted services are internal services that must be deployed before they can be used in tests. TNB provides flexible deployment options to run these services locally with Docker or on OpenShift clusters.
+
+## Deployment options
+
+Self-hosted services can be deployed in three ways:
+
+<CardGroup cols={3}>
+  <Card title="Local with TestContainers" icon="docker">
+    Uses Docker containers managed by TestContainers for local development
+  </Card>
+  <Card title="OpenShift deployment" icon="dharmachakra">
+    Deploys services as pods on OpenShift clusters
+  </Card>
+  <Card title="External instance" icon="link">
+    Connect to an existing external service instance
+  </Card>
+</CardGroup>
+
+## Selecting the deployment mode
+
+Control deployment mode with the `test.use.openshift` system property:
+
+```bash
+# Local deployment with TestContainers (default)
+mvn test
+
+# OpenShift deployment
+mvn test -Dtest.use.openshift=true
+
+# Connect to external instance
+mvn test -Dtnb.kafka.host=kafka.example.com
+```
+
+## Service architecture
+
+Self-hosted services use a three-class structure:
+
+### 1. Abstract base service
+
+Defines the common interface for all deployment types:
+
+```java /home/daytona/workspace/source/system-x/services/kafka/src/main/java/software/tnb/kafka/service/Kafka.java
+public abstract class Kafka extends Service<KafkaAccount, NoClient, KafkaValidation<?>> {
+    protected Map<Class<?>, KafkaValidation> validations;
+    protected Properties props = defaultClientProperties();
+
+    // Abstract methods implemented by deployment-specific subclasses
+    public abstract String bootstrapServers();
+    public abstract String bootstrapSSLServers();
+    public abstract void createTopic(String name, int partitions, int replicas);
+
+    // Common functionality
+    public <T> KafkaValidation<T> validation(Class<T> clazz) {
+        if (!validations.containsKey(clazz)) {
+            validations.put(clazz, createValidation(clazz));
+        }
+        return validations.get(clazz);
+    }
+
+    public void openResources() {
+        validations = new HashMap<>();
+    }
+
+    public void closeResources() {
+        if (validations != null) {
+            validations.values().forEach(validation -> {
+                validation.closeProducer();
+                validation.closeConsumer();
+            });
+        }
+    }
+}
+```
+
+### 2. Local implementation (TestContainers)
+
+Handles Docker-based deployment:
+
+```java /home/daytona/workspace/source/system-x/services/kafka/src/main/java/software/tnb/kafka/resource/local/LocalKafka.java
+@AutoService(Kafka.class)
+public class LocalKafka extends Kafka implements ContainerDeployable<StrimziContainer>, WithDockerImage {
+    private static final Logger LOG = LoggerFactory.getLogger(LocalKafka.class);
+    private StrimziContainer strimziContainer;
+    private ZookeeperContainer zookeeperContainer;
+
+    @Override
+    public String bootstrapServers() {
+        return strimziContainer.getHost() + ":" + strimziContainer.getKafkaPort();
+    }
+
+    @Override
+    public void deploy() {
+        Network network = Network.newNetwork();
+
+        LOG.info("Starting Zookeeper container");
+        zookeeperContainer = new ZookeeperContainer(image(), network);
+        zookeeperContainer.start();
+        LOG.info("Zookeeper container started");
+
+        LOG.info("Starting Kafka container");
+        strimziContainer = new StrimziContainer(image(), network);
+        strimziContainer.start();
+        LOG.info("Kafka container started");
+    }
+
+    @Override
+    public void undeploy() {
+        if (strimziContainer != null) {
+            strimziContainer.stop();
+        }
+        if (zookeeperContainer != null) {
+            zookeeperContainer.stop();
+        }
+    }
+
+    @Override
+    public void openResources() {
+        props.setProperty("bootstrap.servers", bootstrapServers());
+        super.openResources();
+    }
+
+    public String defaultImage() {
+        return "registry.redhat.io/amq-streams/kafka-36-rhel9:2.7.0-17";
+    }
+}
+```
+
+### 3. OpenShift implementation
+
+Handles Kubernetes-based deployment:
+
+```java /home/daytona/workspace/source/system-x/services/kafka/src/main/java/software/tnb/kafka/resource/openshift/OpenshiftKafka.java
+@AutoService(Kafka.class)
+public class OpenshiftKafka extends Kafka implements ReusableOpenshiftDeployable, WithName, WithOperatorHub {
+    private static final Logger LOG = LoggerFactory.getLogger(OpenshiftKafka.class);
+
+    @Override
+    public void deploy() {
+        kafkaCrdClient = OpenshiftClient.get().resources(io.strimzi.api.kafka.model.Kafka.class, KafkaList.class);
+        ReusableOpenshiftDeployable.super.deploy();
+    }
+
+    @Override
+    public void create() {
+        if (!usePreparedGlobalInstallation()) {
+            createSubscription();  // Install operator
+            deployKafkaCR();       // Deploy Kafka custom resource
+        }
+    }
+
+    private void deployKafkaCR() {
+        // Create Kafka custom resource
+        io.strimzi.api.kafka.model.Kafka kafka = new KafkaBuilder()
+            .withNewMetadata()
+                .withName(name())
+            .endMetadata()
+            .withNewSpec()
+                .withNewKafka()
+                    .withReplicas(1)
+                    .addNewListener()
+                        .withName("plain")
+                        .withPort(9092)
+                        .withTls(false)
+                        .withType(KafkaListenerType.INTERNAL)
+                    .endListener()
+                .endKafka()
+            .endSpec()
+            .build();
+
+        kafkaCrdClient.inNamespace(targetNamespace()).resource(kafka).create();
+    }
+
+    @Override
+    public boolean isReady() {
+        return kafkaCrdClient.inNamespace(targetNamespace())
+            .withName(name())
+            .get()
+            .getStatus().getConditions()
+            .stream()
+            .filter(c -> "Ready".equals(c.getType()))
+            .map(Condition::getStatus)
+            .map(Boolean::parseBoolean)
+            .findFirst().orElse(false);
+    }
+
+    @Override
+    public String bootstrapServers() {
+        return findBootstrapServers("plain");
+    }
+
+    @Override
+    public String operatorName() {
+        return "amq-streams";
+    }
+}
+```
+
+## Lifecycle interfaces
+
+### Local deployment interfaces
+
+```java
+public interface Deployable {
+    void deploy();     // Start the service
+    void undeploy();   // Stop the service
+    void openResources();   // Initialize clients
+    void closeResources();  // Close clients
+}
+
+public interface WithDockerImage {
+    String defaultImage();  // Default Docker image
+    String image();         // Image to use (with override support)
+}
+```
+
+### OpenShift deployment interfaces
+
+```java
+public interface OpenshiftDeployable {
+    void create();      // Deploy resources to OpenShift
+    void undeploy();    // Remove resources from OpenShift
+    boolean isReady();  // Check if deployment is ready
+    boolean isDeployed(); // Check if already deployed
+}
+```
+
+## Service lifecycle
+
+The complete lifecycle for self-hosted services:
+
+<Steps>
+  <Step title="Service creation">
+    `ServiceFactory.create()` selects the appropriate implementation based on `test.use.openshift`
+  </Step>
+  <Step title="Deployment">
+    - **Local**: `deploy()` starts Docker containers
+    - **OpenShift**: `create()` deploys pods and waits for readiness
+  </Step>
+  <Step title="Resource initialization">
+    `openResources()` creates clients and connections
+  </Step>
+  <Step title="Test execution">
+    Tests interact with the service through the validation API
+  </Step>
+  <Step title="Resource cleanup">
+    `closeResources()` closes client connections
+  </Step>
+  <Step title="Undeployment">
+    - **Local**: `undeploy()` stops containers
+    - **OpenShift**: `undeploy()` removes deployments
+  </Step>
+</Steps>
+
+## Using self-hosted services
+
+### Basic usage
+
+```java
+import software.tnb.kafka.service.Kafka;
+import software.tnb.common.service.ServiceFactory;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+
+public class KafkaTest {
+    @RegisterExtension
+    public static Kafka kafka = ServiceFactory.create(Kafka.class);
+
+    @Test
+    public void testKafka() {
+        final String topic = "myTopic";
+        final String message = "Hello kafka!";
+        
+        kafka.validation().produce(topic, message);
+        
+        final List<ConsumerRecord<String, String>> records = kafka.validation().consume(topic);
+        Assertions.assertEquals(1, records.size());
+        Assertions.assertEquals(message, records.get(0).value());
+    }
+}
+```
+
+### With configuration
+
+Some services support configuration through `ConfigurableService`:
+
+```java
+import software.tnb.splunk.service.Splunk;
+import software.tnb.splunk.service.configuration.SplunkProtocol;
+
+public class SplunkTest {
+    @RegisterExtension
+    public static Splunk splunk = ServiceFactory.create(Splunk.class, config -> 
+        config.protocol(SplunkProtocol.HTTP)
+    );
+
+    @Test
+    public void testSplunk() {
+        splunk.validation().sendEvent("index", "Test event");
+    }
+}
+```
+
+## Overriding Docker images
+
+Override the default Docker image using system properties:
+
+```bash
+# Override MongoDB image
+mvn test -Dtnb.mongodb.image=mongo:7.0
+
+# Override Kafka image
+mvn test -Dtnb.kafka.image=quay.io/strimzi/kafka:latest-kafka-3.6.0
+```
+
+The property name follows the pattern: `tnb.<serviceName>.image`
+
+## Connecting to external instances
+
+Connect to existing external services instead of deploying:
+
+```bash
+# Connect to external Kafka
+mvn test -Dtnb.kafka.host=kafka.example.com:9092
+
+# Connect to external PostgreSQL
+mvn test -Dtnb.postgresql.host=db.example.com
+```
+
+<Note>
+External instance support is only available for a subset of services. Check the service documentation for availability.
+</Note>
+
+## Example: PostgreSQL database
+
+```java
+import software.tnb.db.postgres.service.PostgreSQL;
+import software.tnb.common.service.ServiceFactory;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+
+public class PostgresTest {
+    @RegisterExtension
+    public static PostgreSQL postgres = ServiceFactory.create(PostgreSQL.class);
+
+    @Test
+    public void testDatabase() throws Exception {
+        // Get JDBC connection
+        try (Connection conn = postgres.validation().getConnection()) {
+            Statement stmt = conn.createStatement();
+            
+            // Create table
+            stmt.execute("CREATE TABLE users (id SERIAL PRIMARY KEY, name VARCHAR(100))");
+            
+            // Insert data
+            stmt.execute("INSERT INTO users (name) VALUES ('Alice'), ('Bob')");
+            
+            // Query data
+            ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM users");
+            rs.next();
+            assertEquals(2, rs.getInt(1));
+        }
+    }
+}
+```
+
+## Example: Redis cache
+
+```java
+import software.tnb.redis.service.Redis;
+import software.tnb.common.service.ServiceFactory;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
+
+public class RedisTest {
+    @RegisterExtension
+    public static Redis redis = ServiceFactory.create(Redis.class);
+
+    @Test
+    public void testRedis() {
+        // Set value
+        redis.validation().set("key", "value");
+        
+        // Get value
+        String value = redis.validation().get("key");
+        assertEquals("value", value);
+        
+        // Test expiration
+        redis.validation().setex("temp", 1, "expires");
+        assertNotNull(redis.validation().get("temp"));
+        
+        Thread.sleep(1100);
+        assertNull(redis.validation().get("temp"));
+    }
+}
+```
+
+## OpenShift-specific features
+
+### Operator-based deployment
+
+Many OpenShift services use operators for management:
+
+```java
+public interface WithOperatorHub {
+    String operatorName();  // Name of the operator to install
+    List<EnvVar> getOperatorEnvVariables();  // Environment variables for operator
+}
+```
+
+### Reusable deployments
+
+Some services support reusable global deployments to speed up test execution:
+
+```bash
+# Use pre-deployed global Kafka instance
+mvn test -Dtest.use.openshift=true -Dtest.use.global.kafka=true
+```
+
+### Service cleanup
+
+Implement cleanup between tests:
+
+```java
+@Override
+public void cleanup() {
+    LOG.debug("Cleaning kafka instance");
+    deleteTopics();
+}
+```
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Use TestContainers locally" icon="docker">
+    Develop and debug with TestContainers for fast feedback loops
+  </Card>
+  <Card title="Test on OpenShift in CI" icon="dharmachakra">
+    Run integration tests on OpenShift to match production environment
+  </Card>
+  <Card title="Implement cleanup" icon="broom">
+    Clean up test data in cleanup() method to ensure test isolation
+  </Card>
+  <Card title="Configure timeouts" icon="clock">
+    Adjust waitTime() for services that take longer to start
+  </Card>
+</CardGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Creating services" icon="code" href="/system-x/creating-services">
+    Learn how to create your own System-X service
+  </Card>
+  <Card title="Available services" icon="list" href="/system-x/available-services">
+    Browse all available System-X services
+  </Card>
+</CardGroup>

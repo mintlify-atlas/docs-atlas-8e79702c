@@ -1,0 +1,439 @@
+---
+title: Integration builders
+description: Build and configure Camel integrations with IntegrationBuilder classes
+---
+
+Integration builders are the foundation for creating Camel integrations in TNB. They provide a fluent API to configure routes, dependencies, properties, and customizations.
+
+## Overview
+
+The integration builder hierarchy provides builders for different use cases:
+
+- **AbstractIntegrationBuilder**: Base class with methods common to all products
+- **IntegrationBuilder**: Concrete implementation for general use
+- **AbstractGitIntegrationBuilder**: For Git-based integrations
+- **AbstractMavenGitIntegrationBuilder**: For Maven projects from Git
+- **SpringBootIntegrationBuilder**: Spring Boot-specific features
+
+## Creating an integration builder
+
+### Basic usage
+
+The most common builder is `IntegrationBuilder`:
+
+```java
+import software.tnb.product.integration.builder.IntegrationBuilder;
+import org.apache.camel.builder.RouteBuilder;
+
+IntegrationBuilder ib = new IntegrationBuilder("my-integration")
+    .fromRouteBuilder(new RouteBuilder() {
+        @Override
+        public void configure() throws Exception {
+            from("timer:tick?period=1000")
+                .log("Tick: ${body}");
+        }
+    })
+    .dependencies("timer", "log");
+```
+
+### Spring Boot builder
+
+For Spring Boot-specific features:
+
+```java
+import software.tnb.product.csb.integration.builder.SpringBootIntegrationBuilder;
+
+SpringBootIntegrationBuilder ib = new SpringBootIntegrationBuilder("spring-integration")
+    .fromSpringBootXmlCamelContext("camel-context.xml")
+    .dependencies("timer");
+```
+
+## Route builders
+
+The `fromRouteBuilder()` method accepts Camel route builders and transforms them using JavaParser.
+
+### Route builder requirements
+
+<Note>
+  Route builders in TNB have specific requirements due to code transformation:
+  
+  - Must be **named classes** (anonymous classes will fail)
+  - Final fields values are inlined
+  - Only primitive values can be processed
+  - Everything must be in the same file (use `addClass()` for additional classes)
+</Note>
+
+### Example route builder
+
+```java
+import org.apache.camel.builder.RouteBuilder;
+import software.tnb.common.service.ServiceFactory;
+import software.tnb.service.slack.Slack;
+
+class MyTest {
+    @RegisterExtension
+    public static Slack slack = ServiceFactory.create(Slack.class);
+    
+    @Test
+    public void testConsumer() {
+        IntegrationBuilder ib = new IntegrationBuilder("slack-to-log")
+            .fromRouteBuilder(new ConsumerRouteBuilder(slack))
+            .dependencies("slack", "bean");
+        
+        product.createIntegration(ib);
+    }
+    
+    class ConsumerRouteBuilder extends RouteBuilder {
+        final String slackEndpoint;
+        
+        public ConsumerRouteBuilder(Slack slack) {
+            slackEndpoint = String.format(
+                "slack:%s?webhookUrl=%s&token=RAW(%s)",
+                slack.account().channel(),
+                slack.account().webhookUrl(),
+                slack.account().token()
+            );
+        }
+        
+        @Override
+        public void configure() throws Exception {
+            from(slackEndpoint)
+                .log("${body.text}");
+        }
+    }
+}
+```
+
+The generated code becomes:
+
+```java
+package com.test;
+
+import org.apache.camel.builder.RouteBuilder;
+
+public class ConsumerRouteBuilder extends RouteBuilder {
+    @Override
+    public void configure() throws Exception {
+        from(slackEndpoint).log("${body.text}");
+    }
+    
+    final String slackEndpoint = "slack:tests?webhookUrl=<webhook-url>&token=RAW(<token>)";
+}
+```
+
+### Multiple route builders
+
+Add multiple route builders to a single integration:
+
+```java
+IntegrationBuilder ib = new IntegrationBuilder("multi-route")
+    .fromRouteBuilder(
+        routeBuilder1,
+        routeBuilder2,
+        routeBuilder3
+    )
+    .dependencies("timer", "http", "log");
+```
+
+## Dependencies
+
+Add Camel components and other dependencies to your integration.
+
+### Camel components
+
+Dependencies without a colon are assumed to be Camel components:
+
+```java
+ib.dependencies("timer", "log", "http", "kafka");
+```
+
+This automatically adds:
+- `camel-timer` for Camel Spring Boot
+- `camel-quarkus-timer` for Camel Quarkus
+
+### Maven coordinates
+
+Use Maven GA[V] format for non-Camel dependencies:
+
+```java
+import software.tnb.product.util.maven.Maven;
+import org.apache.maven.model.Dependency;
+
+Dependency dep = Maven.createDependency(
+    "org.springframework.boot:spring-boot-starter-web",
+    "org.springframework.boot:spring-boot-starter-tomcat" // exclusion
+);
+
+ib.dependencies(dep);
+```
+
+### Direct dependency objects
+
+```java
+import org.apache.maven.model.Dependency;
+
+Dependency customDep = new Dependency();
+customDep.setGroupId("com.example");
+customDep.setArtifactId("my-lib");
+customDep.setVersion("1.0.0");
+
+ib.dependencies(customDep);
+```
+
+## Properties
+
+Configure application and system properties for your integration.
+
+### Application properties
+
+These become `application.properties` in the generated application:
+
+```java
+ib.addToApplicationProperties("camel.component.kafka.brokers", "localhost:9092")
+  .addToApplicationProperties("my.custom.property", "value");
+
+// From a Map
+Map<String, String> props = Map.of(
+    "quarkus.http.port", "8081",
+    "camel.main.name", "MyIntegration"
+);
+ib.addToApplicationProperties(props);
+
+// From Properties object
+Properties props = new Properties();
+props.load(inputStream);
+ib.addToApplicationProperties(props);
+```
+
+### System properties
+
+JVM system properties for the application:
+
+```java
+ib.addToSystemProperties("java.util.logging.manager", "org.jboss.logmanager.LogManager")
+  .addToSystemProperties("user.timezone", "UTC");
+
+Map<String, String> sysProps = Map.of(
+    "file.encoding", "UTF-8"
+);
+ib.addToSystemProperties(sysProps);
+```
+
+## Resources
+
+Add files and resources to your integration.
+
+### Classpath resources
+
+```java
+ib.addClasspathResource("config/my-config.xml")
+  .addClasspathResource("data/test-data.json");
+```
+
+### Custom resources
+
+```java
+import software.tnb.product.integration.Resource;
+
+Resource resource = new Resource(
+    "application-custom.properties",
+    "camel.main.streamCaching=true\n" +
+    "logging.level.org.apache.camel=DEBUG"
+);
+
+ib.addResource(resource);
+```
+
+## Additional classes
+
+Include additional Java classes in your integration.
+
+### From classpath
+
+```java
+ib.addClass(MyHelperClass.class)
+  .addClass(MyProcessor.class);
+```
+
+### From CompilationUnit
+
+```java
+import com.github.javaparser.ast.CompilationUnit;
+
+CompilationUnit cu = ib.getCompilationUnit(MyClass.class);
+ib.addClass(cu);
+```
+
+### From file path
+
+```java
+import java.nio.file.Path;
+
+// Single file
+ib.addClass(Path.of("/path/to/MyClass.java"));
+
+// Directory (recursively adds all .java files)
+ib.addClass(Path.of("/path/to/src/main/java"));
+```
+
+## Configuration methods
+
+### Port configuration
+
+```java
+// Set the HTTP port
+ib.port(8081);
+
+// Set port without configuring default HTTP server
+ib.port(8081, false);
+
+// Add additional ports for OpenShift
+ib.addAdditionalPorts(9090, 9091);
+```
+
+### Integration name
+
+```java
+ib.name("my-custom-name");
+```
+
+### Maven plugins
+
+```java
+import org.apache.maven.model.Plugin;
+
+Plugin plugin = new Plugin();
+plugin.setGroupId("org.apache.maven.plugins");
+plugin.setArtifactId("maven-surefire-plugin");
+
+ib.addPlugin(plugin);
+```
+
+### Customizers
+
+Apply customizers for product-specific modifications:
+
+```java
+import software.tnb.product.customizer.Customizers;
+
+ib.addCustomizer(
+    Customizers.QUARKUS.customize(builder -> {
+        builder.addToApplicationProperties("quarkus.http.port", "8080");
+    }),
+    Customizers.SPRINGBOOT.customize(builder -> {
+        builder.addToApplicationProperties("server.port", "8080");
+    })
+);
+```
+
+### JVM configuration
+
+```java
+// Java agents
+ib.addJavaAgent("/path/to/agent.jar")
+  .addJavaAgent("/path/to/another-agent.jar");
+
+// VM arguments
+ib.addVmArgument("-Xmx512m")
+  .addVmArgument("-XX:+UseG1GC");
+```
+
+### Byteman rules
+
+```java
+import software.tnb.product.integration.Resource;
+
+Resource bytemanRule = new Resource(
+    "rule.btm",
+    "RULE trace method\n" +
+    "CLASS com.example.MyClass\n" +
+    "METHOD myMethod\n" +
+    "AT ENTRY\n" +
+    "IF true\n" +
+    "DO traceln(\"Method called\")\n" +
+    "ENDRULE"
+);
+
+ib.addBytemanRule(bytemanRule);
+```
+
+### Volumes (OpenShift)
+
+Configure volumes for OpenShift/Kubernetes deployments:
+
+```java
+// ConfigMap volume
+ib.addConfigMapVolume("config-volume", "my-configmap")
+  .addVolumeMount("config-volume", "/etc/config", true);
+
+// Secret volume
+ib.addSecretVolume("secret-volume", "my-secret")
+  .addVolumeMount("secret-volume", "/etc/secrets", true);
+
+// EmptyDir volume
+ib.addEmptyDirVolume("temp-volume")
+  .addVolumeMount("temp-volume", "/tmp/data", false);
+```
+
+### Startup configuration
+
+```java
+// Custom startup regex
+ib.startupRegex("(?m)^.*Application started.*$");
+
+// Skip running the application (build only)
+ib.runApplication(false);
+```
+
+### JBang
+
+Use JBang for running integrations:
+
+```java
+ib.useJBang();
+```
+
+## Complete example
+
+Here's a comprehensive example using many builder features:
+
+```java
+import software.tnb.product.integration.builder.IntegrationBuilder;
+import software.tnb.product.customizer.Customizers;
+import org.apache.camel.builder.RouteBuilder;
+
+IntegrationBuilder ib = new IntegrationBuilder("comprehensive-example")
+    // Route builders
+    .fromRouteBuilder(new RouteBuilder() {
+        @Override
+        public void configure() throws Exception {
+            from("timer:tick?period=5000")
+                .setBody(simple("Current time: ${date:now}"))
+                .log("${body}")
+                .to("http://api.example.com/data");
+        }
+    })
+    // Dependencies
+    .dependencies("timer", "log", "http")
+    // Application properties
+    .addToApplicationProperties("camel.component.http.connectTimeout", "5000")
+    .addToApplicationProperties("logging.level.root", "INFO")
+    // System properties
+    .addToSystemProperties("user.timezone", "UTC")
+    // Port
+    .port(8080)
+    // Customizers
+    .addCustomizer(
+        Customizers.QUARKUS.customize(builder -> {
+            builder.addToApplicationProperties("quarkus.log.console.enable", "true");
+        })
+    )
+    // Resources
+    .addClasspathResource("config/application-custom.properties")
+    // Additional classes
+    .addClass(MyProcessor.class)
+    // JVM configuration
+    .addVmArgument("-Xmx256m");
+
+product.createIntegration(ib);
+```

@@ -1,0 +1,246 @@
+---
+title: AccountFactory
+description: Factory class for creating and populating Account instances with credentials
+---
+
+## Overview
+
+`AccountFactory` is a utility class that creates Account instances and populates them with credentials from various sources. It supports loading credentials from Vault, YAML files, or environment variables.
+
+## Class signature
+
+```java
+public final class AccountFactory
+```
+
+**Package:** `software.tnb.common.account`
+
+## Methods
+
+### create(Class)
+
+Creates an instance of the specified Account class and populates it with credentials from configured loaders.
+
+```java
+public static <T extends Account> T create(Class<T> accountClass)
+```
+
+<ParamField path="accountClass" type="Class<T>" required>
+  The Account class to instantiate and populate
+</ParamField>
+
+<ResponseField name="return" type="T">
+  A new instance of the specified Account class with credentials loaded
+</ResponseField>
+
+**Type parameters:**
+- `T` - Account type that extends `Account`
+
+**Example:**
+
+```java
+// Create a Kafka account with credentials
+KafkaAccount kafka = AccountFactory.create(KafkaAccount.class);
+
+// Create an AWS account with credentials
+AWSAccount aws = AccountFactory.create(AWSAccount.class);
+```
+
+### defaultLoader()
+
+Creates the default credentials loader chain based on available configuration. Loaders are checked in priority order:
+
+1. Vault (with token authentication)
+2. Vault (with AppRole authentication)
+3. YAML string from configuration
+4. YAML file from configuration
+
+```java
+public static CredentialsLoader defaultLoader() throws Exception
+```
+
+<ResponseField name="return" type="CredentialsLoader">
+  A DelegatingCredentialsLoader that tries each configured loader in sequence
+</ResponseField>
+
+**Example:**
+
+```java
+CredentialsLoader loader = AccountFactory.defaultLoader();
+// Loader is automatically used by create() method
+```
+
+### setCredentialsLoader(CredentialsLoader)
+
+Sets a custom credentials loader to override the default loading mechanism.
+
+```java
+public static void setCredentialsLoader(CredentialsLoader loader)
+```
+
+<ParamField path="loader" type="CredentialsLoader" required>
+  The custom CredentialsLoader to use for loading account credentials
+</ParamField>
+
+**Example:**
+
+```java
+// Use a custom credentials loader
+CredentialsLoader customLoader = new YamlCredentialsLoader(
+    new File("/path/to/credentials.yaml")
+);
+AccountFactory.setCredentialsLoader(customLoader);
+
+// All subsequent create() calls will use the custom loader
+KafkaAccount kafka = AccountFactory.create(KafkaAccount.class);
+```
+
+## Credentials loading mechanism
+
+AccountFactory uses a flexible credentials loading system:
+
+### Loader priority
+
+The default loader checks sources in this order:
+
+1. **Vault with token** - If `test.credentials.vault.token` is configured
+2. **Vault with AppRole** - If `test.credentials.vault.role-id` and `test.credentials.vault.secret-id` are configured
+3. **YAML string** - If `test.credentials` contains YAML content
+4. **YAML file** - If `test.credentials.file` points to a file
+
+### Credential IDs
+
+For accounts implementing `WithId`, the factory resolves credential IDs hierarchically:
+
+- Walks up the class hierarchy
+- Collects IDs from each level that implements `WithId`
+- Uses the ID list to look up credentials
+
+<Note>
+  Accounts that don't implement `WithId` are instantiated without credential loading.
+</Note>
+
+## Configuration
+
+Configure credential sources using system properties or test configuration:
+
+<CodeGroup>
+
+```java Vault configuration
+// Token authentication
+System.setProperty("test.credentials.vault.address", "https://vault.example.com");
+System.setProperty("test.credentials.vault.token", "s.xyz123");
+System.setProperty("test.credentials.vault.path.pattern", "secret/data/%s");
+
+// AppRole authentication
+System.setProperty("test.credentials.vault.address", "https://vault.example.com");
+System.setProperty("test.credentials.vault.role-id", "role-123");
+System.setProperty("test.credentials.vault.secret-id", "secret-456");
+```
+
+```java YAML configuration
+// YAML string
+System.setProperty("test.credentials", """
+    kafka:
+      bootstrap.servers: localhost:9092
+    aws:
+      access.key: AKIAIOSFODNN7EXAMPLE
+      secret.key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    """);
+
+// YAML file
+System.setProperty("test.credentials.file", "/path/to/credentials.yaml");
+```
+
+</CodeGroup>
+
+## Custom credentials loaders
+
+You can implement custom credential loading logic:
+
+```java
+public class CustomCredentialsLoader implements CredentialsLoader {
+    
+    @Override
+    public <T extends Account> T get(List<String> credentialIds, Class<T> accountClass) {
+        T account = createInstance(accountClass);
+        
+        // Load credentials from your custom source
+        loadCredentials(account, credentialIds);
+        
+        return account;
+    }
+    
+    private <T extends Account> void loadCredentials(T account, List<String> ids) {
+        // Custom loading logic
+    }
+}
+
+// Use the custom loader
+AccountFactory.setCredentialsLoader(new CustomCredentialsLoader());
+```
+
+## Built-in credential loaders
+
+### VaultCredentialsLoader
+
+Loads credentials from HashiCorp Vault:
+
+```java
+// Token authentication
+VaultCredentialsLoader loader = new VaultCredentialsLoader(
+    "https://vault.example.com",
+    "secret/data/%s",
+    "s.token123"
+);
+
+// AppRole authentication  
+VaultCredentialsLoader loader = new VaultCredentialsLoader(
+    "https://vault.example.com",
+    "secret/data/%s",
+    "role-id",
+    "secret-id"
+);
+```
+
+### YamlCredentialsLoader
+
+Loads credentials from YAML files or strings:
+
+```java
+// From file
+YamlCredentialsLoader loader = new YamlCredentialsLoader(
+    new File("/path/to/credentials.yaml")
+);
+
+// From string
+String yaml = "kafka:\n  bootstrap.servers: localhost:9092";
+YamlCredentialsLoader loader = new YamlCredentialsLoader(yaml);
+```
+
+### DelegatingCredentialsLoader
+
+Tries multiple loaders in sequence:
+
+```java
+List<CredentialsLoader> loaders = Arrays.asList(
+    vaultLoader,
+    yamlLoader,
+    fallbackLoader
+);
+DelegatingCredentialsLoader loader = new DelegatingCredentialsLoader(loaders);
+```
+
+## Error handling
+
+AccountFactory handles errors as follows:
+
+- **No credentials needed**: Accounts without `WithId` are created without loading
+- **Load failure**: Throws test failure via `fail()` with detailed error message
+- **Instantiation failure**: Wraps exceptions in `RuntimeException`
+
+## Related
+
+- [ServiceFactory](/api/service-factory) - Factory for creating Service instances
+- [Service](/api/service) - Base class that uses accounts
+- [ConfigurableService](/api/configurable-service) - Service with configuration support

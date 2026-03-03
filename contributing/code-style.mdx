@@ -1,0 +1,179 @@
+---
+title: Code style
+description: Configure EditorConfig and CheckStyle for TNB development
+---
+
+TNB uses EditorConfig and CheckStyle to maintain consistent code style across the project. This guide will help you set up these tools in IntelliJ IDEA.
+
+## EditorConfig
+
+The EditorConfig file (`.editorconfig`) defines the basic code formatting rules for the TNB project.
+
+### Key configuration rules
+
+The TNB EditorConfig enforces the following standards:
+
+<Accordion title="General settings (all files)">
+  - **Charset**: UTF-8
+  - **Line endings**: LF (Unix-style)
+  - **Indent style**: Spaces
+  - **Indent size**: 4 spaces
+  - **Max line length**: 150 characters
+  - **Final newline**: Required
+  - **Tab width**: 4
+</Accordion>
+
+<Accordion title="Java files">
+  - **Indent style**: Space
+  - **Continuation indent**: 4 spaces
+  - **Brace style**: End of line
+  - **Line wrapping**: Enabled for long lines
+  - **Import organization**: Single class imports (no wildcards)
+  - **Blank lines**: 1 after imports and package declaration
+</Accordion>
+
+<Accordion title="Other file types">
+  - **JSON/YAML**: 2-space indentation
+  - **Shell scripts**: 2-space indentation
+  - **Feature files**: 2-space indentation
+  - **Markdown**: Space indentation
+</Accordion>
+
+### IntelliJ IDEA setup
+
+<Steps>
+  <Step title="Enable EditorConfig plugin">
+    The EditorConfig plugin is typically enabled by default in modern IntelliJ IDEA versions. If not, enable it in **Settings → Plugins**.
+  </Step>
+  
+  <Step title="Configure code style settings">
+    1. Go to **Settings → Editor → Code Style**
+    2. Check **Enable EditorConfig support** (if not already enabled)
+    3. In **Formatter Control**, check **Enable formatter markers in comments**
+  </Step>
+  
+  <Step title="Optional: Automatic formatting on save">
+    Install the [Save Actions](https://plugins.jetbrains.com/plugin/7642-save-actions) plugin to automatically reformat code and organize imports on each save.
+  </Step>
+</Steps>
+
+## CheckStyle
+
+CheckStyle enforces Java-specific coding standards beyond basic formatting.
+
+### Key checks enforced
+
+The TNB CheckStyle configuration (`checkstyle/checkstyle.xml`) includes:
+
+<Accordion title="Whitespace and formatting">
+  - No tab characters in source files
+  - Proper spacing around operators, parentheses, and type casts
+  - Empty line separator between class members (no multiple empty lines)
+  - Generic whitespace rules for `<` and `>` tokens
+</Accordion>
+
+<Accordion title="Naming conventions">
+  - Class names: PascalCase
+  - Method names: camelCase (format: `^[a-z][a-zA-Z0-9_]*$`)
+  - Variable names: camelCase (format: `^[a-z][a-zA-Z0-9_]*$`)
+  - Constants: UPPER_CASE
+  - Type parameters: Single uppercase letters
+</Accordion>
+
+<Accordion title="Import rules">
+  - No wildcard imports (`*`)
+  - No unused imports
+  - No redundant imports
+  - Specific import order with groups:
+    1. `software.tnb`
+    2. `org.jboss.fuse.tnb`
+    3. `org.junit`
+    4. `org`
+    5. `com`
+    6. `javax`
+    7. `java`
+  - Static imports at the top
+  - Groups separated by blank lines
+</Accordion>
+
+<Accordion title="Code structure">
+  - Maximum line length: 150 characters
+  - Maximum anonymous inner class length: 50 lines
+  - Braces required for all control statements
+  - Left curly brace at end of line
+  - Switch statements must have `default` clause
+  - TODOs must be named: `TODO(username): description`
+</Accordion>
+
+<Accordion title="Best practices">
+  - String literals on left side of `equals()` comparisons
+  - No direct instantiation of `java.lang.Boolean`
+  - Simplified boolean expressions and returns
+  - Utility classes must have private constructors
+  - Proper use of `@Override` and `@Deprecated` annotations
+</Accordion>
+
+### IntelliJ IDEA setup
+
+<Steps>
+  <Step title="Install CheckStyle plugin">
+    1. Go to **Settings → Plugins**
+    2. Search for **CheckStyle-IDEA**
+    3. Install the plugin and restart IntelliJ IDEA
+  </Step>
+  
+  <Step title="Configure CheckStyle version">
+    1. Go to **Settings → Tools → Checkstyle**
+    2. Set **Checkstyle version** to any version from `8.24` to `8.43`
+    3. If the configuration file loads successfully after selection, you're good to go
+  </Step>
+  
+  <Step title="Configure scan scope">
+    Set **Scan Scope** to **Only Java sources (including tests)**
+  </Step>
+  
+  <Step title="Set error handling preference">
+    Set **Treat Checkstyle errors as warnings** according to your personal preference.
+  </Step>
+  
+  <Step title="Add configuration file">
+    1. In the **Configuration File** section, click the **+** button
+    2. Select **Use a local Checkstyle file**
+    3. Browse to the `checkstyle/checkstyle.xml` file in the TNB repository
+    4. Add a description (e.g., "TNB configuration")
+    5. Click **OK**
+  </Step>
+  
+  <Step title="Activate the configuration">
+    Mark the newly added configuration as **active** by checking the checkbox next to it.
+  </Step>
+</Steps>
+
+<Note>
+After completing the setup, CheckStyle will automatically validate your code as you work. Pay attention to warnings and errors to ensure your code meets the project standards.
+</Note>
+
+## Formatter control
+
+You can temporarily disable the formatter in specific code sections using special comments:
+
+```java
+// @formatter:off
+String[][] data = {
+    {"very", "long", "array", "that", "should", "not", "be", "reformatted"},
+    {"another", "long", "line", "here"}
+};
+// @formatter:on
+```
+
+Similarly, you can disable CheckStyle for specific sections:
+
+```java
+// CHECKSTYLE:OFF
+TODO: This won't trigger the named TODO requirement
+// CHECKSTYLE:ON
+```
+
+<Info>
+Use formatter control comments sparingly and only when absolutely necessary. In most cases, it's better to follow the standard formatting rules.
+</Info>

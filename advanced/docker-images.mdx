@@ -1,0 +1,534 @@
+---
+title: Docker image configuration
+description: Learn how to override Docker images and configure self-hosted services
+---
+
+Every self-hosted System-X service in TNB uses a default Docker image. You can override these images without modifying source code using system properties.
+
+## Default images
+
+Each service that implements `WithDockerImage` interface defines a default image:
+
+```java
+public abstract class MongoDB implements Service, WithDockerImage {
+    public String defaultImage() {
+        return "quay.io/mongodb/mongodb-community-server:7.0";
+    }
+}
+```
+
+This default is used unless overridden by configuration.
+
+## Overriding Docker images
+
+### Using system properties
+
+Override the image for any service using the property format `tnb.<service>.image`:
+
+<Tabs>
+  <Tab title="test.properties">
+    ```properties
+    # Override MongoDB image
+    tnb.mongodb.image=mongo:7.0
+    
+    # Override Kafka image
+    tnb.kafka.image=confluentinc/cp-kafka:7.5.0
+    
+    # Override PostgreSQL image
+    tnb.postgresql.image=postgres:16-alpine
+    
+    # Override MySQL image
+    tnb.mysql.image=mysql:8.2
+    ```
+  </Tab>
+  
+  <Tab title="Command line">
+    ```bash
+    mvn test \
+      -Dtnb.mongodb.image=mongo:7.0 \
+      -Dtnb.kafka.image=confluentinc/cp-kafka:7.5.0
+    ```
+  </Tab>
+  
+  <Tab title="Environment variables">
+    ```bash
+    export TNB_MONGODB_IMAGE=mongo:7.0
+    export TNB_KAFKA_IMAGE=confluentinc/cp-kafka:7.5.0
+    mvn test
+    ```
+  </Tab>
+</Tabs>
+
+### Property naming convention
+
+The property name is derived from the service class name:
+
+| Service class | Property name | Example |
+|--------------|---------------|----------|
+| `MongoDB` | `tnb.mongodb.image` | `mongo:7.0` |
+| `PostgreSQL` | `tnb.postgresql.image` | `postgres:16` |
+| `Kafka` | `tnb.kafka.image` | `confluentinc/cp-kafka:7.5.0` |
+| `MySQL` | `tnb.mysql.image` | `mysql:8.2` |
+| `Redis` | `tnb.redis.image` | `redis:7-alpine` |
+| `Elasticsearch` | `tnb.elasticsearch.image` | `elasticsearch:8.11.0` |
+
+<Note>
+The service name is converted to lowercase: `MongoDB` → `mongodb`, `PostgreSQL` → `postgresql`
+</Note>
+
+## How image resolution works
+
+TNB resolves the image to use with this logic:
+
+<Steps>
+  <Step title="Check system property">
+    Look for `tnb.<servicename>.image` system property
+  </Step>
+  <Step title="Use default if not found">
+    If property not set, use the value from `defaultImage()` method
+  </Step>
+  <Step title="Apply to deployment">
+    Use resolved image in TestContainers (local) or OpenShift deployment
+  </Step>
+</Steps>
+
+<CodeGroup>
+```java WithDockerImage interface
+public interface WithDockerImage {
+    String SYSTEM_PROPERTY_FORMAT = "tnb.%s.image";
+
+    default String image() {
+        return TestConfiguration.getProperty(
+            String.format(SYSTEM_PROPERTY_FORMAT, 
+                ReflectionUtil.getSuperClassName(this.getClass()).toLowerCase()),
+            defaultImage()
+        );
+    }
+
+    String defaultImage();
+}
+```
+
+```java MongoDB example
+public abstract class MongoDB implements Service, WithDockerImage {
+    // Returns "quay.io/mongodb/mongodb-community-server:7.0"
+    // unless tnb.mongodb.image property is set
+    public String defaultImage() {
+        return "quay.io/mongodb/mongodb-community-server:7.0";
+    }
+}
+```
+</CodeGroup>
+
+## Common use cases
+
+### Testing with specific versions
+
+Test your application against multiple service versions:
+
+```properties
+# Test with MongoDB 6.0
+tnb.mongodb.image=mongo:6.0
+
+# Test with MongoDB 7.0
+tnb.mongodb.image=mongo:7.0
+```
+
+```bash
+# Run test suite with different versions
+mvn test -Dtnb.mongodb.image=mongo:6.0
+mvn test -Dtnb.mongodb.image=mongo:7.0
+```
+
+### Using private registries
+
+Pull images from private container registries:
+
+```properties
+# Private registry with authentication
+tnb.kafka.image=registry.company.com/kafka:3.6.0
+tnb.mongodb.image=registry.company.com/mongodb:7.0
+
+# Artifactory/Nexus registry
+tnb.postgresql.image=artifactory.company.com/docker/postgres:16
+```
+
+<Info>
+Ensure Docker/Podman is authenticated to your private registry:
+```bash
+docker login registry.company.com
+```
+</Info>
+
+### Using specific distributions
+
+Choose between different distributions of the same service:
+
+<Tabs>
+  <Tab title="MongoDB">
+    ```properties
+    # Official MongoDB image
+    tnb.mongodb.image=mongo:7.0
+    
+    # Red Hat MongoDB image
+    tnb.mongodb.image=registry.access.redhat.com/rhscl/mongodb-36-rhel7
+    
+    # Bitnami MongoDB image
+    tnb.mongodb.image=bitnami/mongodb:7.0
+    ```
+  </Tab>
+  
+  <Tab title="PostgreSQL">
+    ```properties
+    # Official PostgreSQL
+    tnb.postgresql.image=postgres:16
+    
+    # Alpine-based (smaller size)
+    tnb.postgresql.image=postgres:16-alpine
+    
+    # PostGIS-enabled
+    tnb.postgresql.image=postgis/postgis:16-3.4
+    ```
+  </Tab>
+  
+  <Tab title="Kafka">
+    ```properties
+    # Confluent Kafka
+    tnb.kafka.image=confluentinc/cp-kafka:7.5.0
+    
+    # Apache Kafka
+    tnb.kafka.image=apache/kafka:3.6.0
+    
+    # Red Hat AMQ Streams
+    tnb.kafka.image=registry.redhat.io/amq-streams/kafka-36-rhel8:2.6.0
+    ```
+  </Tab>
+</Tabs>
+
+### Platform-specific images
+
+Use architecture-specific images for ARM/M1 Macs:
+
+```properties
+# ARM64-compatible images
+tnb.mongodb.image=mongo:7.0  # Multi-arch
+tnb.postgresql.image=postgres:16-alpine  # Multi-arch
+tnb.redis.image=redis:7-alpine  # Multi-arch
+
+# Explicit ARM64 image
+tnb.mysql.image=arm64v8/mysql:8.2
+```
+
+## Connecting to external services
+
+Instead of deploying a service, connect to an external instance:
+
+### Using external host property
+
+Specify the hostname of an external service:
+
+```properties
+# Connect to external Kafka
+tnb.kafka.host=kafka.example.com:9092
+
+# Connect to external MongoDB
+tnb.mongodb.host=mongodb.example.com:27017
+
+# Connect to external PostgreSQL
+tnb.postgresql.host=postgres.example.com:5432
+```
+
+When `tnb.<service>.host` is set, TNB skips deployment and connects to the specified host.
+
+<Warning>
+The service must be accessible from your test environment. Ensure network connectivity and firewall rules allow access.
+</Warning>
+
+### Example usage
+
+<CodeGroup>
+```properties test.properties
+# Use external Kafka cluster
+tnb.kafka.host=kafka-prod.company.com:9092
+
+# Other services deployed locally
+tnb.mongodb.image=mongo:7.0
+tnb.postgresql.image=postgres:16
+```
+
+```java Test class
+@RegisterExtension
+public static Kafka kafka = ServiceFactory.create(Kafka.class);
+// Connects to kafka-prod.company.com:9092 instead of deploying
+
+@RegisterExtension  
+public static MongoDB mongodb = ServiceFactory.create(MongoDB.class);
+// Deploys MongoDB container locally with mongo:7.0 image
+
+@Test
+public void testWithExternalKafka() {
+    kafka.validation().produce("events", "test message");
+    // Produces to external Kafka cluster
+}
+```
+</CodeGroup>
+
+## OpenShift deployments
+
+Image overrides work with OpenShift deployments too:
+
+```properties
+# Deploy to OpenShift
+test.use.openshift=true
+
+# Use custom images in OpenShift
+tnb.kafka.image=registry.redhat.io/amq-streams/kafka-36-rhel8:2.6.0
+tnb.mongodb.image=registry.access.redhat.com/rhscl/mongodb-36-rhel7
+
+# OpenShift connection
+openshift.kubeconfig=~/.kube/config
+openshift.namespace=test-services
+```
+
+<Info>
+When deploying to OpenShift, ensure the image is:
+- Accessible from the OpenShift cluster
+- Compatible with OpenShift security constraints
+- Available in a registry the cluster can pull from
+</Info>
+
+## Service configuration
+
+Some services have additional configuration options beyond images.
+
+### Using ConfigurableService
+
+Services extending `ConfigurableService` can be configured via code:
+
+```java
+import software.tnb.common.service.ServiceFactory;
+import software.tnb.splunk.service.Splunk;
+import software.tnb.splunk.service.configuration.SplunkConfiguration.SplunkProtocol;
+
+@RegisterExtension
+public static Splunk splunk = ServiceFactory.create(
+    Splunk.class, 
+    config -> config.protocol(SplunkProtocol.HTTP)
+);
+```
+
+### Available configurations
+
+Check service-specific documentation for configuration options:
+
+- **Splunk**: Protocol (HTTP/HTTPS), HEC token
+- **Kafka**: Number of brokers, replication factor
+- **Elasticsearch**: Cluster name, heap size
+- **MySQL**: Root password, database name
+
+Example:
+
+```java
+// Kafka with custom configuration
+@RegisterExtension
+public static Kafka kafka = ServiceFactory.create(
+    Kafka.class,
+    config -> config
+        .brokers(3)
+        .replicationFactor(2)
+);
+```
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Pin versions" icon="thumbtack">
+    Use specific version tags instead of `latest` for reproducible tests:
+    ```properties
+    tnb.mongodb.image=mongo:7.0.4
+    ```
+  </Card>
+  
+  <Card title="Test multiple versions" icon="layer-group">
+    Create test profiles for different service versions:
+    ```bash
+    mvn test -Ppostgres-15
+    mvn test -Ppostgres-16
+    ```
+  </Card>
+  
+  <Card title="Use official images" icon="certificate">
+    Prefer official images from verified publishers for security and reliability.
+  </Card>
+  
+  <Card title="Document overrides" icon="book">
+    Keep a `test.properties.template` documenting all available overrides for your team.
+  </Card>
+  
+  <Card title="Cache images locally" icon="download">
+    Pre-pull images to speed up test execution:
+    ```bash
+    docker pull mongo:7.0
+    docker pull postgres:16
+    ```
+  </Card>
+  
+  <Card title="Monitor image sizes" icon="chart-simple">
+    Use Alpine or slim variants when possible to reduce download time and disk usage.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Image not found">
+    Verify the image exists and is accessible:
+    ```bash
+    docker pull mongo:7.0
+    ```
+    
+    Check image name spelling and version tag:
+    ```properties
+    # Wrong
+    tnb.mongodb.image=mongo:70
+    
+    # Correct
+    tnb.mongodb.image=mongo:7.0
+    ```
+  </Accordion>
+  
+  <Accordion title="Authentication required">
+    For private registries, authenticate Docker:
+    ```bash
+    docker login registry.company.com
+    ```
+    
+    For OpenShift, create image pull secret:
+    ```bash
+    oc create secret docker-registry registry-secret \
+      --docker-server=registry.company.com \
+      --docker-username=user \
+      --docker-password=pass
+    ```
+  </Accordion>
+  
+  <Accordion title="Architecture mismatch">
+    On ARM Macs, ensure images support ARM64:
+    ```bash
+    # Check image platforms
+    docker manifest inspect mongo:7.0 | grep architecture
+    ```
+    
+    Use multi-arch images or explicit ARM64 variants:
+    ```properties
+    tnb.mongodb.image=mongo:7.0  # Multi-arch
+    ```
+  </Accordion>
+  
+  <Accordion title="Image override not applied">
+    Verify property name matches service class name:
+    ```bash
+    # Check service class
+    grep "class.*MongoDB" -r system-x/services/
+    
+    # Use lowercase service name
+    tnb.mongodb.image=mongo:7.0
+    ```
+    
+    Ensure property is loaded:
+    ```bash
+    mvn test -Dtnb.mongodb.image=mongo:7.0 -X | grep mongodb.image
+    ```
+  </Accordion>
+  
+  <Accordion title="Version incompatibility">
+    Some image versions may not be compatible with TNB's client libraries.
+    
+    Check service logs for errors:
+    ```bash
+    docker logs <container-id>
+    ```
+    
+    Try using the default image first, then upgrade incrementally.
+  </Accordion>
+</AccordionGroup>
+
+## Examples
+
+<Tabs>
+  <Tab title="Multi-version testing">
+    ```properties postgres-15.properties
+    test.use.openshift=false
+    tnb.postgresql.image=postgres:15-alpine
+    ```
+    
+    ```properties postgres-16.properties
+    test.use.openshift=false
+    tnb.postgresql.image=postgres:16-alpine
+    ```
+    
+    ```bash
+    # Test with PostgreSQL 15
+    mvn test -Dtest.properties=postgres-15.properties
+    
+    # Test with PostgreSQL 16
+    mvn test -Dtest.properties=postgres-16.properties
+    ```
+  </Tab>
+  
+  <Tab title="Private registry">
+    ```properties test.properties
+    # Pull images from private registry
+    tnb.mongodb.image=registry.company.com/mongodb:7.0
+    tnb.kafka.image=registry.company.com/kafka:3.6.0
+    tnb.postgresql.image=registry.company.com/postgres:16
+    
+    # Other test configuration
+    test.use.openshift=false
+    test.credentials.file=~/credentials.yaml
+    ```
+    
+    ```bash
+    # Authenticate to registry
+    docker login registry.company.com
+    
+    # Run tests
+    mvn test
+    ```
+  </Tab>
+  
+  <Tab title="Hybrid deployment">
+    ```properties test.properties
+    # External production Kafka
+    tnb.kafka.host=kafka-prod.company.com:9092
+    
+    # Local test databases with custom images
+    tnb.mongodb.image=mongo:7.0
+    tnb.postgresql.image=postgres:16-alpine
+    tnb.redis.image=redis:7-alpine
+    
+    # OpenShift for application under test
+    test.use.openshift=true
+    openshift.kubeconfig=~/.kube/config
+    ```
+  </Tab>
+  
+  <Tab title="OpenShift with Red Hat images">
+    ```properties test.properties
+    # Deploy to OpenShift
+    test.use.openshift=true
+    openshift.kubeconfig=~/.kube/config
+    openshift.namespace=tnb-testing
+    
+    # Use Red Hat certified images
+    tnb.kafka.image=registry.redhat.io/amq-streams/kafka-36-rhel8:2.6.0
+    tnb.mongodb.image=registry.access.redhat.com/rhscl/mongodb-36-rhel7
+    tnb.postgresql.image=registry.redhat.io/rhel8/postgresql-13:latest
+    
+    # Credentials
+    test.credentials.use.vault=true
+    test.credentials.vault.address=https://vault.company.com
+    test.credentials.vault.token=${VAULT_TOKEN}
+    ```
+  </Tab>
+</Tabs>
