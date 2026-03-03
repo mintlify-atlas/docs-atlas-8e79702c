@@ -1,0 +1,123 @@
+{
+  "projectType": "framework",
+  "projectName": "TNB",
+  "projectDescription": "A JUnit 5 testing framework for integration testing with external services and Camel applications",
+  "theme": "aspen",
+  "primaryColor": "#007396",
+  "lightColor": "#4B9CD3",
+  "darkColor": "#005073",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core-concepts/services",
+              "core-concepts/accounts",
+              "core-concepts/validation",
+              "core-concepts/deployment-modes"
+            ]
+          },
+          {
+            "group": "System-X Services",
+            "pages": [
+              "system-x/overview",
+              "system-x/available-services",
+              "system-x/remote-services",
+              "system-x/self-hosted-services",
+              "system-x/creating-services"
+            ]
+          },
+          {
+            "group": "Camel Integration Testing",
+            "pages": [
+              "camel/overview",
+              "camel/products",
+              "camel/integration-builders",
+              "camel/customizers",
+              "camel/deployment-strategies"
+            ]
+          },
+          {
+            "group": "Advanced Usage",
+            "pages": [
+              "advanced/configuration",
+              "advanced/credentials",
+              "advanced/cli-tool",
+              "advanced/docker-images"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "contributing/overview",
+              "contributing/code-style"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core API",
+            "pages": [
+              "api/service-factory",
+              "api/service",
+              "api/account-factory",
+              "api/configurable-service"
+            ]
+          },
+          {
+            "group": "Product API",
+            "pages": [
+              "api/product-factory",
+              "api/integration-builder",
+              "api/customizers"
+            ]
+          },
+          {
+            "group": "Deployment API",
+            "pages": [
+              "api/deployable",
+              "api/openshift-deployable"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "JUnit 5 extension system for managing external services",
+    "52+ System-X service integrations (AWS, Azure, Kafka, databases, etc.)",
+    "Support for local (TestContainers) and OpenShift deployments",
+    "Integration testing for Apache Camel applications (Quarkus & Spring Boot)",
+    "Flexible credential management (HashiCorp Vault, YAML files)",
+    "JBang CLI tool for terminal usage",
+    "Service abstraction with Account, Client, and Validation pattern"
+  ],
+  "publicApiSurface": [
+    "ServiceFactory.create()",
+    "AccountFactory.create()",
+    "ProductFactory.create()",
+    "@RegisterExtension annotation usage",
+    "Service.account()",
+    "Service.client()",
+    "Service.validation()",
+    "IntegrationBuilder",
+    "SpringBootIntegrationBuilder",
+    "Customizers enum",
+    "ServiceConfiguration",
+    "OpenshiftConfiguration"
+  ]
+}
